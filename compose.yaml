@@ -1,0 +1,25 @@
+services:
+  ledger:
+    build: .
+    ports:
+      - "127.0.0.1:${LEDGER_PORT:-8765}:8000"
+    environment:
+      LEDGER_DATA_DIR: /data
+      LEDGER_COOKIE_SECURE: "${LEDGER_COOKIE_SECURE:-0}"
+    volumes:
+      - ledger-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+volumes:
+  ledger-data:

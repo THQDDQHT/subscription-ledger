@@ -1,0 +1,55 @@
+# 私人订阅账本
+
+单用户中文手机 Web，Flask + SQLite + 原生 HTML/CSS/JS。**所有金额固定人民币**。手动录入，不接银行、邮箱，不自动扣款或取消订阅，无分析遥测。
+
+## 当前交付边界
+
+源码及隔离验收，不是公网部署；未配置 Nginx、域名或常驻服务。Docker 配置已提供但未实际构建/启动。手机响应式样式已实现，真实手机浏览器验收仍需完成。正式上线前须批准端口、域名、HTTPS、数据目录和回滚方案。
+
+## 本机运行（Python 3.12+）
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+# 交互输入，不把明文密码放入命令行或环境变量：
+.venv/bin/flask --app app:create_app init-password
+# 仅本机可访问，Ctrl-C 停止：
+.venv/bin/gunicorn --bind 127.0.0.1:8765 --workers 1 --threads 4 'app:create_app()'
+```
+
+如使用 uv，可用 `uv venv .venv`、`uv pip install --python .venv/bin/python -r requirements-dev.txt`。运行时只需 `requirements.txt`，pytest 是开发依赖；Node 仅用于前端回归测试。
+
+默认数据目录为项目下 `data/`。可设置 `LEDGER_DATA_DIR` 为专用绝对路径；创建目录默认 0700，数据库、密码哈希及会话密钥 0600。不要把数据目录置于静态资源目录或提交版本库。密码 12–1024 字符，以 scrypt 哈希存储。首次未初始化时不能登录。更换密码后须重启所有应用进程，轮换的会话密钥才会使旧会话失效。密码不包含在 JSON 备份内。
+
+`LEDGER_COOKIE_SECURE=1` 用于 HTTPS 部署；默认 0 仅为了 loopback HTTP 测试。不得把明文 HTTP 服务直接暴露公网。会话 HttpOnly、SameSite=Strict，12 小时有效；写请求校验 CSRF。错误登录每来源 IP 15 分钟内最多 5 次，反代不信任 X-Forwarded-For，因此反代部署共享限速桶。
+
+## 使用与统计口径
+
+- 新增/编辑名称、人民币每期金额、月/年/自定义天数周期、计划日期、自动续费标识、管理链接、备注。
+- 使用中、准备取消计入预算；已取消续费、已结束排除。取消标记不会替你在服务商取消，管理链接仅接受无凭证 http/https。
+- “已续费”要求明确确认实际续费日与下一次日期；不能以未来日期确认实际付款。不会随日期到来自动改账。
+- 月底按目标月份最后有效日处理，保留原始日/月锚点；直接编辑计划日期或周期重置锚点，手工续费不重置。
+- 日期按 Asia/Shanghai。窗口为 `[今天, 今天+7/30天)`，逾期单列；预计支出展开周期，不代表扣费已发生。
+- 年付月度等效为金额/12；天数周期为金额×365/天数/12；合计后四舍五入到分，不是实际账单。
+
+## 备份、恢复与回滚
+
+页面导出 JSON 包含订阅及续费历史，不包含登录密码/密钥。备份仍含私人备注，需安全存放。
+
+恢复须明确确认，严格校验格式/version=1/CNY、金额、日期、锚点、ID 唯一性及历史引用；最多 2000 条订阅、10000 条历史，请求体最大 2 MiB（包含 JSON 包装）。验证失败不改库。恢复前将旧数据库备份到 `data/backups/*.sqlite3`，随后在同一写锁下事务覆盖；写入失败回滚。
+
+需从服务器旧库回滚时：先停止账本服务，保留当前 `ledger.sqlite3` 副本，再用指定备份替换数据目录的 `ledger.sqlite3`，确认属主及 0600 权限后重启。不要在服务运行中直接复制覆盖 SQLite 文件。JSON 恢复不更改登录密码或会话密钥。服务器完整迁移可在停止服务后备份整个专用数据目录；含秘密，不能公开分享。
+
+## 自动验收
+
+```sh
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/http_smoke.py
+node scripts/session_regression.cjs
+```
+
+pytest 覆盖 CRUD、状态、金额、日期锚点、预测、错误密码、限速、CSRF、恢复校验/回滚/备份失败及历史日期快进。HTTP 烟测使用随机密码、临时库及随机 **127.0.0.1** 端口，执行真实 Cookie 登录、CRUD、月底续费、备份恢复、进程重启持久化和退出隔离；结束终止子进程并检查端口关闭，临时数据删除。前端 Node 回归执行真实 API helper，验证会话过期/刷新失败时清除私人 DOM/弹窗及更新 CSRF，不替代真实浏览器测试。
+
+## Docker（仅配置，尚未验证，执行需另行批准）
+
+提供 `Dockerfile`、`compose.yaml`，非 root 用户、只读根文件系统、命名卷 `ledger-data` 持久化 `/data`，主机端口仅 loopback，默认 8765。上线获批后可构建镜像、在一次性容器交互运行 `flask --app app:create_app init-password`，再启动服务。HTTPS 场景配置 `LEDGER_COOKIE_SECURE=1` 并使用现有反向代理；无需另占 80/443。
