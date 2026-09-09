@@ -33,7 +33,7 @@ function renderItems() {
  if(!filtered.length)area.append(text('p',items.length?'此状态暂无订阅。':'还没有订阅。从“新增订阅”开始，所有数据由你录入。','empty'));
  for(const r of filtered){
   const card=text('article','','subscription');const head=text('div','','section-head');head.append(text('h3',r.name),text('strong',`¥${r.amount}`));card.append(head);
-  const cycle=r.cycle==='monthly'?'月付':r.cycle==='yearly'?'年付':`每 ${r.days} 天`;
+  const cycle=r.cycle==='monthly'?'月付':r.cycle==='quarterly'?'季付':r.cycle==='yearly'?'年付':`每 ${r.days} 天`;
   card.append(text('p',`${labels[r.status]} · ${cycle} · ${r.auto_renew?'自动续费已开':'手动续费'}`),text('p',`下次计划：${r.next_date}${r.next_date<stats.today && ['active','cancelling'].includes(r.status)?' · 逾期未确认':''}`));
   if(r.end_date)card.append(text('p',`服务截止：${r.end_date}`)); if(r.notes)card.append(text('p',r.notes,'notes'));
   const buttons=text('div','','actions');buttons.append(action('编辑',()=>edit(r),'secondary'));

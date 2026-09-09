@@ -48,6 +48,7 @@ def main():
             assert request('/')[0]==200
             assert request('/static/app.js')[0]==200
             assert request('/static/style.css')[0]==200
+            assert request('/static/favicon.svg')[0]==200
             assert request('/api/items')[0]==401;checks.append('HTTP 未登录隔离/HTML及静态资源')
             _,s,h=request('/api/session');token=s['csrf'];assert any(cookie.has_nonstandard_attr('HttpOnly') for cookie in jar)
             assert request('/api/login','POST',{'password':password},token='invalid')[0]==403
@@ -57,16 +58,24 @@ def main():
             record['amount']='20.01';assert request('/api/items/'+ident,'PUT',record,token)[0]==200
             assert request('/api/items/'+ident+'/renew','POST',{'actual_date':'2024-01-31','next_date':'2024-02-29','confirm':True},token)[0]==200
             assert request('/api/items')[1][0]['suggested_next']=='2024-03-31';checks.append('HTTP 新增/编辑/月底续费')
+            quarterly={**record,'name':'HTTP季付验收','cycle':'quarterly','next_date':'2024-01-31'}
+            status,q,_=request('/api/items','POST',quarterly,token);assert status==201;qid=q['id']
+            assert request('/api/items/'+qid+'/renew','POST',{'actual_date':'2024-01-31','next_date':'2024-04-30','confirm':True},token)[0]==200
+            assert next(r for r in request('/api/items')[1] if r['id']==qid)['suggested_next']=='2024-07-31'
             original=request('/api/export')[1]
             assert request('/api/restore','POST',{'confirm':True,'backup':{'bad':1}},token)[0]==400
             assert request('/api/export')[1]==original
             assert request('/api/restore','POST',{'confirm':True,'backup':original},token)[0]==200
+            assert request('/api/export')[1]==original
+            assert next(r for r in request('/api/items')[1] if r['id']==qid)['suggested_next']=='2024-07-31'
+            checks.append('HTTP 季付月底续费及混合周期备份恢复')
             assert len(list((Path(root)/'backups').glob('*.sqlite3')))==1;checks.append('HTTP 导出/坏输入保护/恢复前备份')
             assert request('/api/summary')[0]==200
             process.terminate();process.join(timeout=10)
             process,port=start()
             assert request('/api/items')[1][0]['amount']=='20.01';checks.append('进程真实重启后数据库及会话持久化')
             assert request('/api/items/'+ident,'DELETE',{'confirm':True},token)[0]==200
+            assert request('/api/items/'+qid,'DELETE',{'confirm':True},token)[0]==200
             assert request('/api/items')[1]==[]
             assert request('/api/logout','POST',{},token)[0]==200
             assert request('/api/export')[0]==401;checks.append('HTTP 删除/退出后拒绝读取')

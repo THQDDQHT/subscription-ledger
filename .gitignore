@@ -7,3 +7,10 @@ data/
 .git/
 *.sqlite3
 artifacts/
+preview-data/
+backups/
+.PAT
+*.key
+*.hash
+*.log
+*.pid

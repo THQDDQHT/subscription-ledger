@@ -35,7 +35,7 @@ def validate(data, previous=None, restoring=False):
     out['amount_cents'] = int(Decimal(amount)*100)
     out['amount'] = money(out['amount_cents'])
     cycle = data.get('cycle')
-    if cycle not in ('monthly','yearly','days'): raise ValueError('周期不正确')
+    if cycle not in ('monthly','quarterly','yearly','days'): raise ValueError('周期不正确')
     out['cycle'] = cycle
     days=data.get('days')
     if cycle=='days' and (type(days) is not int or not 1<=days<=36500): raise ValueError('天数须为 1–36500 的整数')
@@ -64,8 +64,10 @@ def money(cents):
 def advance(r):
     d=date.fromisoformat(r['next_date'])
     if r['cycle']=='days': return (d+timedelta(days=r['days'])).isoformat()
-    if r['cycle']=='monthly':
-        year=d.year+(d.month==12); month=d.month%12+1
+    if r['cycle'] in ('monthly','quarterly'):
+        step = 3 if r['cycle']=='quarterly' else 1
+        year, month = divmod(d.year*12+d.month-1+step, 12)
+        month += 1
     else:
         year=d.year+1; month=r['anchor_month']
     return date(year,month,min(r['anchor_day'],calendar.monthrange(year,month)[1])).isoformat()
@@ -76,7 +78,7 @@ def summary(rows,today):
     for r in rows:
         if r['status'] not in ('active','cancelling'): continue
         cents=Decimal(r['amount_cents'])
-        budget += cents if r['cycle']=='monthly' else cents/12 if r['cycle']=='yearly' else cents*365/r['days']/12
+        budget += cents if r['cycle']=='monthly' else cents/3 if r['cycle']=='quarterly' else cents/12 if r['cycle']=='yearly' else cents*365/r['days']/12
         if date.fromisoformat(r['next_date'])<today: overdue.append(r)
         occurrence=dict(r)
         # Jump past historical cycles in O(1), retaining the original anchors.
@@ -86,8 +88,16 @@ def summary(rows,today):
                 periods=((today-planned).days+r['days']-1)//r['days']
                 candidate=planned+timedelta(days=periods*r['days'])
             else:
-                year=today.year
-                month=today.month if r['cycle']=='monthly' else r['anchor_month']
+                if r['cycle'] in ('monthly','quarterly'):
+                    step = 3 if r['cycle']=='quarterly' else 1
+                    elapsed = (today.year-planned.year)*12+today.month-planned.month
+                    # Keep the schedule's month phase, including custom confirmations.
+                    periods = max(1, elapsed//step)
+                    year, month = divmod(planned.year*12+planned.month-1+periods*step, 12)
+                    month += 1
+                else:
+                    year=today.year
+                    month=r['anchor_month']
                 candidate=date(year,month,min(r['anchor_day'],calendar.monthrange(year,month)[1]))
                 # A custom confirmed date remains the first occurrence; only
                 # subsequent cycles use the anchor and may be fast-forwarded.
