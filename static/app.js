@@ -18,6 +18,8 @@ function icon(id) {
 /* 金额与日期的展示口径：金额千分位、日期保留 ISO 记录并补中文读法。 */
 function money(value) { const [whole,fraction]=String(value).split('.'); return '¥'+whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction?'.'+fraction:''); }
 function moneyCents(cents) { return money((cents/100).toFixed(2)); }
+// 渲染用：货币符号单独成元素以便弱化，数字保持等宽；纯文本场景仍用 money()。
+function moneyNode(value) { const f=document.createDocumentFragment(); f.append(text('span','¥','cur'),document.createTextNode(money(value).slice(1))); return f; }
 function parseDay(iso) { return Date.parse(iso+'T00:00:00Z'); }
 function daysUntil(dateStr) { return (parseDay(dateStr)-parseDay(stats.today))/86400000; }
 function friendlyDate(iso) {
@@ -90,6 +92,25 @@ function emptyState(title, desc, control) {
   if(control) box.append(control);
   return box;
 }
+// 首次加载超过 120ms 才显示骨架，避免本地秒开时闪一下。
+function bone(cls) { return text('span','','bone '+cls); }
+function skeletonRows(count=6) {
+  const frag=document.createDocumentFragment();
+  for(let i=0;i<count;i++){
+    const row=text('div','','subscription skeleton');row.setAttribute('aria-hidden','true');
+    const title=text('div','','row-title');const name=text('div','','row-name');name.append(bone('bone--w60'),bone('bone--w40'));title.append(bone('bone--avatar'),name);
+    const amount=text('div','','row-amount');amount.append(bone('bone--w60'),bone('bone--w40'));
+    const date=text('div','','row-date');date.append(bone('bone--w60'),bone('bone--w80'));
+    const status=text('div','','row-status');status.append(bone('bone--chip'));
+    row.append(title,amount,date,status,text('div','','row-actions'));frag.append(row);
+  }
+  return frag;
+}
+function setLoading(on) {
+  $('#overview').classList.toggle('is-loading',on);
+  if(on){$('#list-scroll').setAttribute('aria-busy','true');$('#items').replaceChildren(skeletonRows());$('#result-count').textContent='正在加载…';}
+  else $('#list-scroll').removeAttribute('aria-busy');
+}
 // 近期按订阅的当前计划分组；预测事件只用于统计，不生成重复操作。
 function isActive(r) {return ['active','cancelling'].includes(r.status);}
 function recentGroup(r) {
@@ -112,7 +133,7 @@ function subscriptionRow(r) {
   const avatar=text('span',Array.from(r.name)[0]||'订','avatar avatar--'+r.status);avatar.setAttribute('aria-hidden','true');
   const name=text('span','','row-name');name.append(text('span',r.name,'service-name'),text('small',r.auto_renew?'自动续费已开':'手动续费','row-subline'));
   title.append(avatar,name);title.setAttribute('aria-label',`查看 ${r.name} 的详情`);
-  const amount=text('div','','row-amount');amount.append(text('strong',money(r.amount)),text('small',cycleLabel(r)));
+  const amount=text('div','','row-amount');const price=text('strong','');price.append(moneyNode(r.amount));amount.append(price,text('small',cycleLabel(r)));
   const date=text('div','','row-date');
   if(active){const rel=relativeDay(r.next_date);if(rel.cls)date.classList.add(rel.cls);date.append(text('strong',rel.text),dateNode(r.next_date));}
   else{date.classList.add('idle');date.append(text('strong',r.end_date?'服务截止':'不再计入预算'));date.append(r.end_date?dateNode(r.end_date):text('small','—'));}
@@ -144,9 +165,9 @@ function renderItems() {
     const section=text('details','','subscription-group'+(kind==='overdue'?' group--overdue':kind==='week'?' group--soon':''));section.open=keyword.trim()?true:!collapsedGroups.has(group.key);
     const heading=text('summary','','group-heading');
     const lead=text('span','','group-lead');lead.append(text('span',group.title,'group-title'),text('span',`${group.rows.length} 项`,'count'));heading.append(lead);
-    if(viewKey==='recent'||['active','cancelling'].includes(kind))heading.append(text('span',moneyCents(group.rows.reduce((n,r)=>n+r.amount_cents,0)),'group-sum'));
+    if(viewKey==='recent'||['active','cancelling'].includes(kind)){const sum=text('span','','group-sum');sum.append(moneyNode((group.rows.reduce((n,r)=>n+r.amount_cents,0)/100).toFixed(2)));heading.append(sum);}
     section.append(heading);
-    section.addEventListener('toggle',()=>{if(keyword.trim()||!section.isConnected)return;if(section.open)collapsedGroups.delete(group.key);else collapsedGroups.add(group.key);});
+    section.addEventListener('toggle',()=>{if(!section.isConnected)return;if(section.open){section.classList.add('just-opened');setTimeout(()=>section.classList.remove('just-opened'),300);}if(keyword.trim())return;if(section.open)collapsedGroups.delete(group.key);else collapsedGroups.add(group.key);});
     for(const r of group.rows)section.append(subscriptionRow(r));area.append(section);
   }
   restoreListFocus();
@@ -189,9 +210,18 @@ function renderViews() {
   renderDetail();renderItems();$('#list-scroll').scrollTop=scroll;
 }
 async function load() {
-  const result=await Promise.all([api('/api/items'),api('/api/summary')]);
+  const first=!items.length;
+  const pending=first?setTimeout(()=>setLoading(true),120):0;
+  let result;
+  try{result=await Promise.all([api('/api/items'),api('/api/summary')]);}
+  catch(e){
+    clearTimeout(pending);setLoading(false);
+    if(first&&!$('#ledger').hidden){$('#items').replaceChildren(emptyState('无法加载账本',e.message||String(e),action('重试',load,'ghost')));$('#result-count').textContent='';}
+    throw e;
+  }
+  clearTimeout(pending);setLoading(false);
   [items,stats]=result;
-  $('#budget').textContent=money(stats.monthly_budget);$('#forecast').textContent=money(stats.forecast_30);
+  $('#budget').replaceChildren(moneyNode(stats.monthly_budget));$('#forecast').replaceChildren(moneyNode(stats.forecast_30));
   const overdue=items.filter(r=>isActive(r)&&daysUntil(r.next_date)<0).length;
   $('#overdue-count').textContent=`${overdue} 项`;$('#overdue-count').classList.toggle('is-zero',overdue===0);
   $('#window-note').textContent=`今天 ${stats.today} · ${friendlyDate(stats.today)} · 中国标准时间`;
@@ -211,7 +241,8 @@ function renderDetail() {
   $('#board').classList.toggle('has-detail',!!r);
   if(!r){if(d.open)d.close();if(selectedId){selectedId='';history.replaceState(null,'',routeURL(viewKey));}displayedDetailId='';$('#detail-body').replaceChildren();$('#detail-actions').replaceChildren();return;}
   const body=$('#detail-body'),scroll=displayedDetailId===r.id?body.scrollTop:0;displayedDetailId=r.id;$('#detail-title').textContent=r.name;body.replaceChildren();
-  body.append(text('span',labels[r.status],`chip chip--${r.status}`),text('p',money(r.amount),'detail-amount'),text('p',cycleLabel(r),'muted'));
+  const price=text('p','','detail-amount');price.append(moneyNode(r.amount));
+  body.append(text('span',labels[r.status],`chip chip--${r.status}`),price,text('p',cycleLabel(r),'muted'));
   const plan=text('div','','detail-plan');
   if(isActive(r)){const rel=relativeDay(r.next_date);if(rel.cls)plan.classList.add(rel.cls);plan.append(text('span','当前待确认计划'),text('strong',rel.text),text('span',`${r.next_date} · ${friendlyDate(r.next_date)}`,'detail-plan-date'));}
   else plan.append(text('span','原计划日期'),text('strong',r.next_date),text('span',friendlyDate(r.next_date),'detail-plan-date'));
@@ -282,13 +313,15 @@ async function logout(){try{await api('/api/logout','POST',{});location.reload()
 $('#logout').addEventListener('click',logout);
 $('#logout-mobile').addEventListener('click',logout);
 // 外观：跟随系统 / 浅色 / 深色。偏好存浏览器本地，theme.js 在首帧前读取。
-function applyTheme(mode){
-  if(mode==='light'||mode==='dark')document.documentElement.dataset.theme=mode;else delete document.documentElement.dataset.theme;
+function applyTheme(mode, animate){
+  const root=document.documentElement;
+  if(animate){root.classList.add('theme-transition');setTimeout(()=>root.classList.remove('theme-transition'),320);}
+  if(mode==='light'||mode==='dark')root.dataset.theme=mode;else delete root.dataset.theme;
   try{if(mode==='system')localStorage.removeItem('ledger-theme');else localStorage.setItem('ledger-theme',mode);}catch(e){/* 私密模式等无法持久化时仍即时生效 */}
   for(const b of document.querySelectorAll('[data-theme-mode]'))b.setAttribute('aria-pressed',String(b.dataset.themeMode===mode));
 }
-for(const b of document.querySelectorAll('[data-theme-mode]'))b.addEventListener('click',()=>applyTheme(b.dataset.themeMode));
-applyTheme(document.documentElement.dataset.theme||'system');
+for(const b of document.querySelectorAll('[data-theme-mode]'))b.addEventListener('click',()=>applyTheme(b.dataset.themeMode,true));
+applyTheme(document.documentElement.dataset.theme||'system',false);
 $('#export').addEventListener('click',async()=>{try{const backup=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`订阅账本-${stats.today}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);reportOk('已导出备份 JSON。');}catch(e){reportError(e);}});
 $('#import-file').addEventListener('change',()=>{$('#restore').disabled=!$('#import-file').files.length;localReport('#restore-status','');});
 $('#restore').addEventListener('click',async()=>{const button=$('#restore');try{const file=$('#import-file').files[0];if(!file)throw new Error('请先选择备份文件');if(file.size>2*1024*1024)throw new Error('文件超过 2 MiB');const backup=JSON.parse(await file.text());const incoming=Array.isArray(backup?.items)?backup.items.length:0;

@@ -972,14 +972,13 @@ dialog form,.drawer-layout {
   padding:0 12px;
   min-width:0
 }
-.table-head>span+span,.subscription>*+* {
-  border-left:1px solid var(--line)
-}
 .table-head {
   position:sticky;
   top:0;
-  z-index:1;
-  background:var(--card);
+  z-index:2;
+  background:color-mix(in srgb,var(--card) 86%,transparent);
+  -webkit-backdrop-filter:blur(10px);
+  backdrop-filter:blur(10px);
   height:36px;
   align-items:center;
   color:var(--muted);
@@ -1062,11 +1061,22 @@ dialog form,.drawer-layout {
   font-variant-numeric:tabular-nums
 }
 .row-amount strong {
-  font-size:15.5px;
+  font-size:16px;
   font-weight:650;
   letter-spacing:-.01em;
   line-height:1.2;
   white-space:nowrap
+}
+/* 货币符号退后一步，数字才是主角。 */
+.cur {
+  font-size:.72em;
+  font-weight:500;
+  color:var(--muted);
+  margin-right:.08em;
+  letter-spacing:0
+}
+.subscription.selected .cur {
+  color:var(--accent-ink)
 }
 .row-amount small,.row-date time,.row-date small {
   font-size:12px;
@@ -1107,6 +1117,18 @@ dialog form,.drawer-layout {
 .row-actions .compact {
   white-space:nowrap
 }
+/* 鼠标环境下行操作按需显现：悬停、行内聚焦或已选中时出现；触屏常显。 */
+@media (hover:hover) and (pointer:fine) {
+  .row-actions .compact {
+    opacity:0;
+    transform:translateX(4px);
+    transition:opacity .15s var(--ease),transform .15s var(--ease),background .15s var(--ease),border-color .15s var(--ease)
+  }
+  .subscription:hover .row-actions .compact,.subscription:focus-within .row-actions .compact,.subscription.selected .row-actions .compact {
+    opacity:1;
+    transform:none
+  }
+}
 .row-chevron {
   width:18px;
   height:18px;
@@ -1121,6 +1143,9 @@ dialog form,.drawer-layout {
   color:var(--accent)
 }
 .group-heading {
+  position:sticky;
+  top:36px;
+  z-index:1;
   display:grid;
   grid-template-columns:minmax(240px,1fr) 150px minmax(0,1fr);
   align-items:center;
@@ -1130,7 +1155,9 @@ dialog form,.drawer-layout {
   font-size:13px;
   font-weight:600;
   color:var(--ink);
-  background:var(--soft);
+  background:color-mix(in srgb,var(--soft) 84%,transparent);
+  -webkit-backdrop-filter:blur(10px);
+  backdrop-filter:blur(10px);
   border-bottom:1px solid var(--line);
   list-style:none;
   user-select:none
@@ -1200,6 +1227,76 @@ dialog form,.drawer-layout {
 .empty button,.empty a {
   margin-top:14px
 }
+/* 分组展开时行淡入；仅在用户点击时加 just-opened，搜索重绘不触发。 */
+.subscription-group.just-opened>.subscription {
+  animation:row-in .22s var(--ease) both
+}
+@keyframes row-in {
+  from {
+    opacity:0;
+    transform:translateY(-4px)
+  }
+  to {
+    opacity:1;
+    transform:none
+  }
+}
+/* 骨架：首次加载超过 120ms 才出现。 */
+.subscription.skeleton {
+  cursor:default;
+  pointer-events:none
+}
+.skeleton .row-title {
+  display:flex;
+  align-items:center;
+  gap:12px
+}
+.skeleton .row-name {
+  flex:1;
+  gap:8px
+}
+.bone {
+  display:block;
+  height:11px;
+  border-radius:6px;
+  background:linear-gradient(90deg,var(--soft) 25%,var(--line) 50%,var(--soft) 75%);
+  background-size:200% 100%;
+  animation:shimmer 1.4s linear infinite
+}
+.row-amount .bone+.bone,.row-date .bone+.bone {
+  margin-top:8px
+}
+.bone--w40 {
+  width:40%
+}
+.bone--w60 {
+  width:60%
+}
+.bone--w80 {
+  width:80%
+}
+.bone--avatar {
+  width:32px;
+  height:32px;
+  border-radius:8px;
+  flex-shrink:0
+}
+.bone--chip {
+  width:56px;
+  height:20px;
+  border-radius:5px
+}
+@keyframes shimmer {
+  from {
+    background-position:200% 0
+  }
+  to {
+    background-position:-200% 0
+  }
+}
+.overview.is-loading .metrics strong {
+  opacity:.35
+}
 
 /* 账页随所在容器宽度换列：中等宽度收窄列，窄容器改为卡片。 */
 @container list (max-width:979px) {
@@ -1230,9 +1327,6 @@ dialog form,.drawer-layout {
   }
   .subscription>* {
     padding:0
-  }
-  .subscription>*+* {
-    border-left:0
   }
   .row-title {
     grid-column:1;
@@ -1278,6 +1372,7 @@ dialog form,.drawer-layout {
     display:none
   }
   .group-heading {
+    top:0;
     display:flex;
     gap:10px;
     padding:8px 16px;
@@ -1684,9 +1779,8 @@ dialog form,.drawer-layout {
     min-height:44px;
     height:44px
   }
-  .list-caption>span:last-child {
-    max-width:150px;
-    text-align:right
+  .list-caption {
+    padding:10px 16px
   }
   .mobile-nav {
     position:fixed;
@@ -1804,6 +1898,10 @@ dialog form,.drawer-layout {
     opacity:1;
     transform:none
   }
+}
+/* 手动切换深浅色时给颜色 250ms 过渡；仅在切换瞬间挂 class，平时不影响组件自身过渡。 */
+.theme-transition,.theme-transition *,.theme-transition *::before,.theme-transition *::after {
+  transition:background-color .25s var(--ease),color .25s var(--ease),border-color .25s var(--ease),fill .25s var(--ease)!important
 }
 @media(prefers-reduced-motion:reduce) {
   *,*::before,*::after {
