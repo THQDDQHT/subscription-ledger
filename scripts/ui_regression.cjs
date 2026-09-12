@@ -31,3 +31,19 @@ assert.equal(run("parseRoute('#unknown').view"),'recent');
 assert.equal(run("routeURL('all','a b')"),'#all?item=a%20b');
 run("viewKey='recent';keyword='';filterKey='cancelled'");assert.equal(run('selectGroups().length'),0);
 console.log('PASS navigation parsing, detail links and recent status filtering');
+
+// 展示口径：金额千分位、中文日期与相对天数；记录本身仍是 ISO。
+run("stats={today:'2026-09-12'}");
+assert.equal(run("money('138.00')"),'¥138.00');
+assert.equal(run("money('34323.97')"),'¥34,323.97');
+assert.equal(run("money('1234567.5')"),'¥1,234,567.5');
+assert.equal(run("moneyCents(77600)"),'¥776.00');
+assert.equal(run("friendlyDate('2026-09-08')"),'9月8日 周二');
+assert.equal(run("friendlyDate('2027-01-31')"),'2027年1月31日 周日');
+assert.equal(run("friendlyDate('')"),'');
+assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-08'))")),{text:'逾期 4 天',cls:'overdue'});
+assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-12'))")),{text:'今天',cls:'soon'});
+assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-13'))")),{text:'明天',cls:'soon'});
+assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-18'))")),{text:'还剩 6 天',cls:'soon'});
+assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-19'))")),{text:'还剩 7 天',cls:''});
+console.log('PASS money grouping, Chinese dates with weekday, relative day boundaries');
