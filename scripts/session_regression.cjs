@@ -2,21 +2,27 @@
 const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
 const nodes=new Map();
 function node(s){if(!nodes.has(s))nodes.set(s,{hidden:false,textContent:'private',value:'private',open:true,replaceChildren(){this.textContent='';},reset(){this.value='';},close(){this.open=false;}});return nodes.get(s);}
-let responses=[];
-const context=vm.createContext({document:{querySelector:node},fetch:async()=>{const r=responses.shift();if(r instanceof Error)throw r;return {ok:r.status===200,status:r.status,json:async()=>r.body};},console});
+let responses=[];let replacedURL;
+const history={replaceState(_state,_title,url){replacedURL=url;}};
+const context=vm.createContext({history,location:{pathname:'/',search:''},document:{querySelector:node},fetch:async()=>{const r=responses.shift();if(r instanceof Error)throw r;return {ok:r.status===200,status:r.status,json:async()=>r.body};},console});
 const source=fs.readFileSync('static/app.js','utf8').split("$('#login-form').addEventListener")[0];
 vm.runInContext(source,context);
 (async()=>{
  for(const failRefresh of [false,true]){
-  vm.runInContext("csrf='stale';items=[{name:'secret'}];stats={today:'secret'}",context);
+  vm.runInContext("csrf='stale';items=[{name:'secret'}];stats={today:'secret'};selectedId='private-id'",context);
   responses=[{status:401,body:{error:'expired'}},failRefresh?new Error('offline'):{status:200,body:{csrf:'fresh'}}];
   await assert.rejects(vm.runInContext("api('/api/items')",context));
   assert.equal(vm.runInContext('csrf',context),failRefresh?'':'fresh');
   assert.equal(node('#ledger').hidden,true);
   assert.equal(node('#items').textContent,'');
-  assert.equal(node('#upcoming').textContent,'');
+  assert.equal(replacedURL,'/');
+  assert.equal(vm.runInContext('selectedId',context),'');
+  assert.equal(node('#filter').value,'all');
   assert.equal(node('#editor').open,false);
   assert.equal(node('#renew-dialog').open,false);
+  assert.equal(node('#detail').open,false);
+  for(const key of ['#detail-title','#detail-body','#detail-actions','#recent-count','#all-count','#result-count','#plan-preview'])assert.equal(node(key).textContent,'');
+  assert.equal(node('#search').value,'');
   assert.equal(vm.runInContext('items.length',context),0);
  }
  console.log('PASS expired session refreshes CSRF; offline failure clears private DOM/dialogs/state');
