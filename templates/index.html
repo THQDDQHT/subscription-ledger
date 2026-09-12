@@ -75,20 +75,30 @@
 
     </div>
   <section id="backup-page" class="backup" hidden>
-    <div class="backup-sheet">
-    <h2><svg aria-hidden="true"><use href="#i-shield"/></svg>数据备份与恢复</h2>
-    <p class="muted">导出包含订阅及续费历史，不含登录秘密。恢复会覆盖全部记录，服务器将先备份旧数据库。请妥善保存敏感备注。</p>
-    <div class="actions">
-      <button id="export" class="ghost"><svg aria-hidden="true"><use href="#i-download"/></svg>导出 JSON</button>
-      <button id="restore" class="danger" disabled><svg aria-hidden="true"><use href="#i-restore"/></svg>校验并恢复备份</button>
+    <div class="backup-grid">
+      <article class="backup-card" aria-labelledby="export-title">
+        <div class="backup-card-head"><h2 id="export-title">导出备份</h2></div>
+        <p class="muted">生成一份 JSON 文件，包含全部订阅与续费历史，不含登录密码。文件里有你的私人备注，请妥善保存。</p>
+        <dl class="backup-facts">
+          <dt>内容</dt><dd id="export-count">—</dd>
+          <dt>文件名</dt><dd id="export-name">—</dd>
+          <dt>上次导出</dt><dd id="export-last">尚未在此浏览器导出</dd>
+        </dl>
+        <div class="backup-card-foot"><button id="export"><svg aria-hidden="true"><use href="#i-download"/></svg>导出 JSON</button></div>
+      </article>
+      <article class="backup-card" aria-labelledby="restore-title">
+        <div class="backup-card-head"><h2 id="restore-title">恢复备份</h2><span class="backup-tag">覆盖操作</span></div>
+        <p class="muted">用一份导出的 JSON 覆盖当前全部记录。恢复前服务器会先备份旧数据库，完成后在这里显示备份文件名。</p>
+        <label class="dropzone" id="dropzone"><input id="import-file" type="file" accept=".json,application/json" class="sr-only"><svg class="dropzone-icon" aria-hidden="true"><use href="#i-restore"/></svg><span class="dropzone-title">拖入或点击选择备份 JSON</span><span class="dropzone-hint">仅接受本应用导出的文件，最大 2 MiB</span></label>
+        <div id="import-summary" class="import-summary" hidden></div>
+        <p id="restore-status" role="status"></p>
+        <div class="backup-card-foot"><button id="restore" class="danger" disabled><svg aria-hidden="true"><use href="#i-restore"/></svg>校验并恢复备份</button></div>
+      </article>
     </div>
-    <label>选择要恢复的 JSON（最大 2 MiB）<input id="import-file" type="file" accept=".json,application/json"></label>
-    <p id="restore-status" role="status"></p>
-    <p class="muted">本应用不会自动扣款、取消订阅或发送主动提醒。取消请前往对应服务操作，再更新这里的状态。</p>
+    <p class="backup-note muted">本应用不会自动扣款、取消订阅或发送主动提醒。取消请前往对应服务操作，再更新这里的状态。</p>
     <div class="mobile-account">
       <div class="theme-picker" role="group" aria-label="外观"><button type="button" data-theme-mode="system" aria-pressed="true"><svg aria-hidden="true"><use href="#i-auto"/></svg><span class="theme-label">跟随系统</span></button><button type="button" data-theme-mode="light" aria-pressed="false"><svg aria-hidden="true"><use href="#i-sun"/></svg><span class="theme-label">浅色</span></button><button type="button" data-theme-mode="dark" aria-pressed="false"><svg aria-hidden="true"><use href="#i-moon"/></svg><span class="theme-label">深色</span></button></div>
       <button id="logout-mobile" class="ghost" hidden><svg aria-hidden="true"><use href="#i-logout"/></svg>退出登录</button>
-    </div>
     </div>
   </section>  </main>
   <nav class="mobile-nav" aria-label="手机导航"><a href="#recent" data-view="recent"><svg aria-hidden="true"><use href="#i-logo"/></svg>近期处理</a><a href="#all" data-view="all"><svg aria-hidden="true"><use href="#i-list"/></svg>全部订阅</a><a href="#backup" data-view="backup"><svg aria-hidden="true"><use href="#i-shield"/></svg>备份</a></nav>
