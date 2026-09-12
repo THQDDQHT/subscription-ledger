@@ -31,8 +31,9 @@
   --tap:44px;
   --ease:cubic-bezier(.2,.8,.2,1)
 }
+/* 深色：默认跟随系统；用户在侧栏手动选择时以 <html data-theme> 为准（theme.js 首帧前写入）。 */
 @media(prefers-color-scheme:dark) {
-  :root {
+  :root:not([data-theme=light]) {
     color-scheme:dark;
     --bg:#131917;
     --card:#1a201e;
@@ -61,6 +62,35 @@
     --shadow:0 12px 32px -8px #000a,0 2px 6px #0006;
     --shadow-lg:0 24px 64px -16px #000c,0 4px 12px #0007
   }
+}
+:root[data-theme=dark] {
+  color-scheme:dark;
+  --bg:#131917;
+  --card:#1a201e;
+  --soft:#212927;
+  --ink:#e9efeb;
+  --muted:#a3b0a9;
+  --line:#2f3936;
+  --rule:#3d4a45;
+  --accent:#7cd6be;
+  --accent-hover:#9ce4d2;
+  --accent-soft:#1f3a33;
+  --accent-ink:#bfeadc;
+  --on-accent:#0f2a26;
+  --nav:#171d1b;
+  --nav-muted:#a3b0a9;
+  --nav-hover:#232b28;
+  --nav-current:#27312d;
+  --nav-badge:#2b3531;
+  --danger:#ff9ea9;
+  --danger-hover:#ffb3bb;
+  --danger-soft:#3d262b;
+  --on-danger:#2b151a;
+  --warn:#f0c283;
+  --warn-soft:#3a3123;
+  --shadow-sm:0 1px 2px #0006,0 8px 24px -12px #0008;
+  --shadow:0 12px 32px -8px #000a,0 2px 6px #0006;
+  --shadow-lg:0 24px 64px -16px #000c,0 4px 12px #0007
 }
 
 /* ---------- 基础 ---------- */
@@ -664,6 +694,47 @@ dialog form,.drawer-layout {
   background:var(--accent-soft);
   color:var(--accent-ink)
 }
+.sidebar-bottom {
+  margin-top:auto;
+  display:grid;
+  gap:6px;
+  padding-top:20px
+}
+.theme-picker {
+  display:flex;
+  gap:2px;
+  padding:3px;
+  border-radius:9px;
+  background:var(--nav-badge)
+}
+.theme-picker button {
+  flex:1;
+  min-height:34px;
+  padding:0 6px;
+  gap:6px;
+  border-radius:7px;
+  background:transparent;
+  color:var(--nav-muted);
+  font-size:12.5px;
+  font-weight:500;
+  white-space:nowrap
+}
+.theme-picker button svg {
+  width:15px;
+  height:15px
+}
+.theme-picker button:hover {
+  background:var(--nav-hover);
+  color:var(--ink)
+}
+.theme-picker button[aria-pressed=true] {
+  background:var(--nav-current);
+  color:var(--ink);
+  box-shadow:0 1px 2px #0000000f
+}
+.mobile-account {
+  display:none
+}
 .main-workspace {
   display:flex;
   flex-direction:column;
@@ -700,72 +771,6 @@ dialog form,.drawer-layout {
 }
 .topbar #add {
   white-space:nowrap
-}
-.topbar #menu-button {
-  margin-left:4px
-}
-.menu {
-  position:fixed;
-  inset:auto;
-  top:56px;
-  right:22px;
-  margin:0;
-  min-width:220px;
-  padding:6px;
-  border:0;
-  border-radius:10px;
-  background:var(--card);
-  color:var(--ink);
-  box-shadow:var(--shadow-lg);
-  display:none
-}
-.menu:popover-open {
-  display:grid;
-  gap:2px;
-  animation:menu-in .16s var(--ease)
-}
-@keyframes menu-in {
-  from {
-    opacity:0;
-    transform:translateY(-4px)
-  }
-  to {
-    opacity:1;
-    transform:none
-  }
-}
-.menu-item {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  width:100%;
-  min-height:40px;
-  padding:0 12px;
-  border:0;
-  border-radius:7px;
-  background:transparent;
-  color:var(--ink);
-  font-size:13.5px;
-  font-weight:500;
-  text-decoration:none;
-  justify-content:flex-start;
-  white-space:nowrap;
-  cursor:pointer
-}
-.menu-item svg {
-  width:17px;
-  height:17px;
-  color:var(--muted)
-}
-.menu-item:hover {
-  background:var(--soft)
-}
-.menu-item[aria-current=page] {
-  background:var(--accent-soft);
-  color:var(--accent-ink)
-}
-.menu-item[aria-current=page] svg {
-  color:currentColor
 }
 
 /* ---------- 统计 ---------- */
@@ -1477,8 +1482,11 @@ dialog form,.drawer-layout {
   padding:0 4px 26px;
   justify-content:center
 }
-.nav-collapsed .brand-copy,.nav-collapsed .count {
+.nav-collapsed .brand-copy,.nav-collapsed .nav-item .count,.nav-collapsed .theme-label {
   display:none
+}
+.nav-collapsed .theme-picker {
+  flex-direction:column
 }
 .nav-collapsed .nav-item {
   justify-content:center;
@@ -1544,8 +1552,11 @@ dialog form,.drawer-layout {
     padding:0 4px 26px;
     justify-content:center
   }
-  .brand-copy,.sidebar .count,#collapse-nav {
+  .brand-copy,.sidebar .count,#collapse-nav,.theme-label {
     display:none
+  }
+  .theme-picker {
+    flex-direction:column
   }
   .nav-item {
     justify-content:center;
@@ -1600,10 +1611,6 @@ dialog form,.drawer-layout {
     min-height:40px;
     font-size:13px;
     padding:0 12px
-  }
-  .menu {
-    top:calc(54px + env(safe-area-inset-top));
-    right:12px
   }
   .overview {
     padding:2px 16px 12px
@@ -1759,6 +1766,24 @@ dialog form,.drawer-layout {
     min-height:44px;
     font-size:13px
   }
+  .mobile-account {
+    display:grid;
+    gap:12px;
+    margin-top:24px;
+    padding-top:20px;
+    border-top:1px solid var(--line)
+  }
+  .mobile-account .theme-picker {
+    background:var(--soft)
+  }
+  .mobile-account .theme-picker button {
+    min-height:40px;
+    color:var(--muted)
+  }
+  .mobile-account .theme-picker button[aria-pressed=true] {
+    background:var(--card);
+    color:var(--ink)
+  }
   #message {
     bottom:calc(74px + env(safe-area-inset-bottom))
   }
@@ -1786,15 +1811,25 @@ dialog form,.drawer-layout {
     animation:none!important
   }
 }
-/* 深色模式下阴影不可见：弹窗与覆盖式详情改用描边定义边缘。 */
+/* 深色模式下阴影不可见：弹窗与覆盖式详情改用描边定义边缘（跟随系统 / 手动深色各一份）。 */
 @media(prefers-color-scheme:dark) {
-  dialog,.menu {
+  :root:not([data-theme=light]) dialog {
     border:1px solid var(--line);
     box-shadow:none
   }
 }
-@media(prefers-color-scheme:dark) and (max-width:1279px) {
-  #detail {
+:root[data-theme=dark] dialog {
+  border:1px solid var(--line);
+  box-shadow:none
+}
+@media(prefers-color-scheme:dark) and (min-width:761px) and (max-width:1279px) {
+  :root:not([data-theme=light]) #detail {
+    border-left:1px solid var(--line);
+    box-shadow:none
+  }
+}
+@media(min-width:761px) and (max-width:1279px) {
+  :root[data-theme=dark] #detail {
     border-left:1px solid var(--line);
     box-shadow:none
   }

@@ -7,6 +7,7 @@
 <title>订阅账本</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/theme.js"></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -27,7 +28,9 @@
 <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6Z"/></symbol>
 <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
 <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
-<symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></symbol>
+<symbol id="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7Z"/></symbol>
 </defs></svg>
 
 <p id="message" role="status" aria-live="polite"></p>
@@ -45,11 +48,15 @@
   <aside class="sidebar" aria-label="工作空间">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><svg><use href="#i-logo"/></svg></span><div class="brand-copy"><b>订阅账本</b><small>个人订阅工作台</small></div></div>
     <nav aria-label="主导航"><a href="#recent" data-view="recent" class="nav-item"><svg aria-hidden="true"><use href="#i-logo"/></svg><span class="nav-text">近期处理</span><span id="recent-count" class="count"></span></a>
-      <a href="#all" data-view="all" class="nav-item"><svg aria-hidden="true"><use href="#i-list"/></svg><span class="nav-text">全部订阅</span><span id="all-count" class="count"></span></a></nav>
+      <a href="#all" data-view="all" class="nav-item"><svg aria-hidden="true"><use href="#i-list"/></svg><span class="nav-text">全部订阅</span><span id="all-count" class="count"></span></a>
+      <a href="#backup" data-view="backup" class="nav-item"><svg aria-hidden="true"><use href="#i-shield"/></svg><span class="nav-text">数据备份</span></a></nav>
+    <div class="sidebar-bottom">
+      <div class="theme-picker" role="group" aria-label="外观"><button type="button" data-theme-mode="system" aria-pressed="true" aria-label="跟随系统" title="跟随系统"><svg aria-hidden="true"><use href="#i-auto"/></svg><span class="theme-label">系统</span></button><button type="button" data-theme-mode="light" aria-pressed="false" aria-label="浅色" title="浅色"><svg aria-hidden="true"><use href="#i-sun"/></svg><span class="theme-label">浅色</span></button><button type="button" data-theme-mode="dark" aria-pressed="false" aria-label="深色" title="深色"><svg aria-hidden="true"><use href="#i-moon"/></svg><span class="theme-label">深色</span></button></div>
+      <button id="logout" class="nav-item" hidden><svg aria-hidden="true"><use href="#i-logout"/></svg><span class="nav-text">退出登录</span></button>
+    </div>
   </aside>
   <main class="main-workspace">
-    <header class="topbar"><button id="collapse-nav" class="icon-btn" aria-label="收起导航" aria-expanded="true"><svg aria-hidden="true"><use href="#i-panel"/></svg></button><span class="brand-mark topbar-mark" aria-hidden="true"><svg><use href="#i-logo"/></svg></span><h1 id="page-title">近期处理</h1><span id="page-desc" class="muted">先处理到期事项，再整理订阅</span><span class="grow"></span><button id="add" title="快捷键 N"><svg aria-hidden="true"><use href="#i-plus"/></svg>新增订阅</button><button id="menu-button" class="icon-btn" popovertarget="menu" aria-label="备份与账户" title="备份与账户"><svg aria-hidden="true"><use href="#i-more"/></svg></button>
-      <div id="menu" class="menu" popover><a href="#backup" data-view="backup" class="menu-item"><svg aria-hidden="true"><use href="#i-shield"/></svg>数据备份与恢复</a><button id="logout" class="menu-item" type="button" hidden><svg aria-hidden="true"><use href="#i-logout"/></svg>退出登录</button></div></header>
+    <header class="topbar"><button id="collapse-nav" class="icon-btn" aria-label="收起导航" aria-expanded="true"><svg aria-hidden="true"><use href="#i-panel"/></svg></button><span class="brand-mark topbar-mark" aria-hidden="true"><svg><use href="#i-logo"/></svg></span><h1 id="page-title">近期处理</h1><span id="page-desc" class="muted">先处理到期事项，再整理订阅</span><span class="grow"></span><button id="add" title="快捷键 N"><svg aria-hidden="true"><use href="#i-plus"/></svg>新增订阅</button></header>
     <section id="overview" class="overview" aria-label="统计">
       <div class="metrics"><article><span>未来 30 天预计续费</span><strong id="forecast">—</strong><small>按计划估算，非已扣款</small></article><article><span>逾期未确认</span><strong id="overdue-count">—</strong><small>确认是否已续费，或更新计划</small></article><article><span>月度等效预算</span><strong id="budget">—</strong><small>周期折算，非实际账单</small></article></div>
       <div class="overview-note"><p id="window-note"></p><details class="calculation"><summary>统计口径</summary><p>使用中与准备取消计入预算。未来 30 天包含今天，不包含第 30 天；同一订阅可能有多次预计续费。近期处理仅显示每个订阅当前待确认的计划，分组小计为组内各订阅当前计划的每期金额之和。</p></details></div>
@@ -78,9 +85,13 @@
     <label>选择要恢复的 JSON（最大 2 MiB）<input id="import-file" type="file" accept=".json,application/json"></label>
     <p id="restore-status" role="status"></p>
     <p class="muted">本应用不会自动扣款、取消订阅或发送主动提醒。取消请前往对应服务操作，再更新这里的状态。</p>
+    <div class="mobile-account">
+      <div class="theme-picker" role="group" aria-label="外观"><button type="button" data-theme-mode="system" aria-pressed="true"><svg aria-hidden="true"><use href="#i-auto"/></svg><span class="theme-label">跟随系统</span></button><button type="button" data-theme-mode="light" aria-pressed="false"><svg aria-hidden="true"><use href="#i-sun"/></svg><span class="theme-label">浅色</span></button><button type="button" data-theme-mode="dark" aria-pressed="false"><svg aria-hidden="true"><use href="#i-moon"/></svg><span class="theme-label">深色</span></button></div>
+      <button id="logout-mobile" class="ghost" hidden><svg aria-hidden="true"><use href="#i-logout"/></svg>退出登录</button>
+    </div>
     </div>
   </section>  </main>
-  <nav class="mobile-nav" aria-label="手机导航"><a href="#recent" data-view="recent"><svg aria-hidden="true"><use href="#i-logo"/></svg>近期处理</a><a href="#all" data-view="all"><svg aria-hidden="true"><use href="#i-list"/></svg>全部订阅</a></nav>
+  <nav class="mobile-nav" aria-label="手机导航"><a href="#recent" data-view="recent"><svg aria-hidden="true"><use href="#i-logo"/></svg>近期处理</a><a href="#all" data-view="all"><svg aria-hidden="true"><use href="#i-list"/></svg>全部订阅</a><a href="#backup" data-view="backup"><svg aria-hidden="true"><use href="#i-shield"/></svg>备份</a></nav>
 </div>
 
 <dialog id="editor" aria-labelledby="editor-title">

@@ -44,13 +44,12 @@ async function api(url, method='GET', body) {
       csrf='';items=[];stats={};focusKey='';filterKey='all';viewKey='recent';keyword='';sortKey='date';collapsedGroups.clear();
       selectedId='';displayedDetailId='';history.replaceState(null,'',location.pathname+location.search);
       $('#search').value='';$('#sort').value='date';$('#filter').value='all';
-      $('#ledger').hidden=true; $('#login-panel').hidden=false; $('#logout').hidden=true;
+      $('#ledger').hidden=true; $('#login-panel').hidden=false; $('#logout').hidden=true; $('#logout-mobile').hidden=true;
       for(const s of ['#items','#detail-body','#detail-actions'])$(s).replaceChildren();
       for(const s of ['#budget','#forecast','#window-note','#renew-name','#renew-diff','#message','#edit-error','#renew-error','#restore-status','#detail-title','#result-count','#recent-count','#all-count','#plan-preview','#overdue-count','#confirm-title','#confirm-body','#confirm-note'])$(s).textContent='';
       $('#message').className='';
       for(const s of ['#editor','#renew-dialog','#detail','#confirm-dialog'])if($(s).open)$(s).close();
       $('#item-form').reset();$('#renew-form').reset();$('#import-file').value='';$('#restore').disabled=true;
-      try{$('#menu').hidePopover();}catch(e){/* popover 未打开或不支持时忽略 */}
       try{csrf=(await api('/api/session')).csrf;}catch(e){/* Login retries session discovery; private DOM stays cleared. */}
     }
     throw new Error(data.error||`请求失败 ${response.status}`);
@@ -248,7 +247,7 @@ function renew(r) {
   $('#renew-dialog').showModal();
 }
 async function submitGuard(form, fn, target) {const b=form.querySelector('button[type="submit"]');const original=b.textContent;b.disabled=true;b.textContent='保存中…';target.textContent='';try{await fn();}catch(e){target.textContent=e.message;}finally{b.disabled=false;b.textContent=original;}}
-$('#login-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{csrf=(await api('/api/session')).csrf;const result=await api('/api/login','POST',{password:e.target.elements.password.value});csrf=result.csrf;e.target.reset();$('#login-panel').hidden=true;$('#ledger').hidden=false;$('#logout').hidden=false;await load();},$('#message'));});
+$('#login-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{csrf=(await api('/api/session')).csrf;const result=await api('/api/login','POST',{password:e.target.elements.password.value});csrf=result.csrf;e.target.reset();$('#login-panel').hidden=true;$('#ledger').hidden=false;$('#logout').hidden=false;$('#logout-mobile').hidden=false;await load();},$('#message'));});
 $('#item-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{const f=e.target.elements;const r={};for(const key of ['name','amount','cycle','next_date','status','url','notes'])r[key]=f[key].value;r.days=r.cycle==='days'?Number(f.days.value):null;r.end_date=f.end_date.value||null;r.auto_renew=f.auto_renew.checked;const editing=f.id.value;clearReport();await api(editing?`/api/items/${editing}`:'/api/items',editing?'PUT':'POST',r);$('#editor').close();focusKey=editing?`${editing}:detail`:'';try{await load();}catch(error){reportError('已保存，但列表刷新失败：'+error.message);return;}reportOk(editing?`已保存「${r.name}」`:`已新增「${r.name}」`);},$('#edit-error'));});
 $('#renew-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{const f=e.target.elements;const r=items.find(x=>x.id===f.id.value);clearReport();await api(`/api/items/${f.id.value}/renew`,'POST',{actual_date:f.actual_date.value,next_date:f.next_date.value,confirm:f.confirm.checked});$('#renew-dialog').close();focusKey=`${f.id.value}:renew`;try{await load();}catch(error){reportError('已记录续费，但列表刷新失败：'+error.message);return;}reportOk(`已续费「${r?r.name:'订阅'}」· 下次 ${f.next_date.value}（${friendlyDate(f.next_date.value)}）`);},$('#renew-error'));});
 $('#item-form').elements.cycle.addEventListener('change',cycleField);
@@ -281,12 +280,18 @@ document.addEventListener('keydown',e=>{
 for(const d of document.querySelectorAll('dialog'))d.addEventListener('click',e=>{if(e.target===d){const box=d.getBoundingClientRect();if(e.clientX<box.left||e.clientX>box.right||e.clientY<box.top||e.clientY>box.bottom){if(d.id==='detail')closeDetail();else d.close();}}});
 async function logout(){try{await api('/api/logout','POST',{});location.reload();}catch(e){reportError(e);}}
 $('#logout').addEventListener('click',logout);
-// 右上角菜单：打开时聚焦首项，选择后收起。
-$('#menu').addEventListener('toggle',e=>{if(e.newState==='open')$('#menu .menu-item:not([hidden])')?.focus();});
-for(const item of document.querySelectorAll('#menu .menu-item'))item.addEventListener('click',()=>$('#menu').hidePopover());
+$('#logout-mobile').addEventListener('click',logout);
+// 外观：跟随系统 / 浅色 / 深色。偏好存浏览器本地，theme.js 在首帧前读取。
+function applyTheme(mode){
+  if(mode==='light'||mode==='dark')document.documentElement.dataset.theme=mode;else delete document.documentElement.dataset.theme;
+  try{if(mode==='system')localStorage.removeItem('ledger-theme');else localStorage.setItem('ledger-theme',mode);}catch(e){/* 私密模式等无法持久化时仍即时生效 */}
+  for(const b of document.querySelectorAll('[data-theme-mode]'))b.setAttribute('aria-pressed',String(b.dataset.themeMode===mode));
+}
+for(const b of document.querySelectorAll('[data-theme-mode]'))b.addEventListener('click',()=>applyTheme(b.dataset.themeMode));
+applyTheme(document.documentElement.dataset.theme||'system');
 $('#export').addEventListener('click',async()=>{try{const backup=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`订阅账本-${stats.today}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);reportOk('已导出备份 JSON。');}catch(e){reportError(e);}});
 $('#import-file').addEventListener('change',()=>{$('#restore').disabled=!$('#import-file').files.length;localReport('#restore-status','');});
 $('#restore').addEventListener('click',async()=>{const button=$('#restore');try{const file=$('#import-file').files[0];if(!file)throw new Error('请先选择备份文件');if(file.size>2*1024*1024)throw new Error('文件超过 2 MiB');const backup=JSON.parse(await file.text());const incoming=Array.isArray(backup?.items)?backup.items.length:0;
   const ok=await confirmDialog({title:'覆盖并恢复备份？',body:`当前 ${items.length} 条订阅及全部续费历史将被备份中的 ${incoming} 条记录替换。`,note:'服务器会先备份现有数据库，恢复后的旧库文件名会显示在这里。',accept:'覆盖并恢复'});
   if(!ok)return;button.disabled=true;localReport('#restore-status','正在恢复…',true);const result=await api('/api/restore','POST',{confirm:true,backup});await load();localReport('#restore-status',`恢复完成，旧数据库已备份为 ${result.backup_file}`,true);$('#import-file').value='';}catch(e){localReport('#restore-status',e.message||String(e),false);}finally{button.disabled=!$('#import-file').files.length;}});
-(async()=>{try{const s=await api('/api/session');csrf=s.csrf;$('#login-panel').hidden=s.authenticated;$('#ledger').hidden=!s.authenticated;$('#logout').hidden=!s.authenticated;if(!s.configured)reportError(new Error('尚未设置密码，请在服务器按 README 初始化。'));if(s.authenticated)await load();}catch(e){reportError(e);}})();
+(async()=>{try{const s=await api('/api/session');csrf=s.csrf;$('#login-panel').hidden=s.authenticated;$('#ledger').hidden=!s.authenticated;$('#logout').hidden=!s.authenticated;$('#logout-mobile').hidden=!s.authenticated;if(!s.configured)reportError(new Error('尚未设置密码，请在服务器按 README 初始化。'));if(s.authenticated)await load();}catch(e){reportError(e);}})();
