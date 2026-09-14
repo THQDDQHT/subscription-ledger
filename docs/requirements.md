@@ -32,7 +32,7 @@
 - 密码安全哈希、登录限速、HttpOnly 会话、写操作 CSRF 防护、链接仅接受 http/https。
 - 默认日期按 Asia/Shanghai 解释，日期采用 YYYY-MM-DD，避免浏览器时区导致偏移。
 - 移动端优先的中文界面；无第三方分析或遥测；不保存服务账号密码/API Key。
-- 轻量后端 + SQLite + 原生 HTML/CSS/JS；提供 Docker 启动配置和持久化数据卷。
+- 轻量后端 + SQLite + 组件化前端（2026-09-14 起为 Next.js + Tailwind，原为原生 HTML/CSS/JS）；提供 Docker 启动配置和持久化数据卷。
 - 开发和隔离测试在 workspace 内进行，不改现有生产服务。
 - 正式部署需要先明确宿主机端口/域名、影响和回滚方案，用户批准后再修改 Nginx 或启动生产服务。默认复用用户现有 Nginx，不另占 80/443。
 

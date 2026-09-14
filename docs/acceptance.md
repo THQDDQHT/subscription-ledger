@@ -1,5 +1,20 @@
 # 核心验收记录
 
+## 2026-09-14 全栈 TypeScript 重写（Next.js 16 单体）
+
+- 用户决定废弃 Python，全栈统一 TS。调研否决「Vite SPA + Flask」（用户不希望保留 Python）与「Next 仅作前端」；选定 Next.js 16 App Router 单体：页面全部为客户端组件（登录墙后 RSC/SSR 无收益），API 走 Route Handlers（单一 catch-all `src/app/api/[...path]/route.ts` 委托框架无关的 `src/server/api.ts`，鉴权/CSRF/限流集中一处，对应原 before_request）。
+- 移植策略：**原 pytest 套件即行为规格，先移植测试再移植实现**。`domain.py` → `src/server/domain.ts`（summary 经可变 `domain` 命名空间调用 advance，保留原猴子补丁测试的拦截语义）；月度预算用 BigInt 有理数精确求和后 HALF_UP 到分，不引入浮点误差。`app.py` 12 个端点逐行平移；better-sqlite3 的 `backup()` 不能跑在持有写事务的同一连接上，恢复前备份改走独立只读连接（语义等价）。
+- 兼容：werkzeug scrypt/pbkdf2 哈希格式用 `crypto.scryptSync`/`pbkdf2Sync` 双向互验通过（Node 生成 → Python 校验、Python 生成 → Node 校验均 True），**现有 data/ 目录沿用，不用重置密码**；旧库自动补列迁移幂等性有测试。会话 Cookie 改为 HMAC 签名 JSON（密钥复用 data/session.key），旧会话一次性失效需重新登录。登录限速改为全局单桶（Node 路由层无对端 IP，语义同原反代部署）。
+- 前端 1:1 平移：原 style.css 组件层整体迁入 `globals.css` 的 `@layer components`（类名不变），令牌注册为 Tailwind `@theme inline` 双主题变量；React 复刻原 DOM 结构与全部文案；原生 `<dialog>` 保留（宽屏 `show()` 并排 / 窄屏 `showModal()`）；图标换 lucide。CSP 用每请求 nonce（`src/proxy.ts`），script-src 保持严格，style-src 放宽 `'unsafe-inline'`（Radix 内联样式，已在方案中获批）；静态哈希资源 immutable 缓存，其余 no-store。
+- 验证：vitest **136 项**全绿（domain 28 + API 97 + 前端 11）；`pnpm smoke`（HTTP 烟测移植版）**9 组**通过；`pnpm build` 通过（TS 7）。playwright-core 驱动本机 Chrome 对生产构建（.next/standalone）做 **48 项**交互检查全过：登录/快捷键（/ N Esc）/搜索/筛选/排序/分组折叠/侧栏折叠/整行点击/宽屏并排详情/手机全屏模态/编辑器天数联动与计划预览/续费默认实付与建议日期/撤销确认取消与接受/焦点恢复/深色切换与刷新保持/导出下载/坏备份就地拒绝/触控目标 ≥44px/1440·1280·900·390 无横向溢出/控制台无 error/warn。
+- 真实数据目录副本（含 werkzeug 哈希与旧库）冷启动验证：旧库打开迁移无误、configured:true、错误密码 401、未登录 401。截图已替换 docs/ui/*.png（合成数据）。
+- 未做：Docker 镜像未构建（配置已更新为 node:24-alpine 多阶段）；真实手机验收；pnpm 11 注意 `allowBuilds` 取代 `onlyBuiltDependencies`（白名单仅 better-sqlite3、esbuild）。开发期 Next dev 需用 localhost 或 127.0.0.1 加 `allowedDevOrigins`（已配置）。
+
+### 2026-09-14 后续修正与 CI
+
+- 修复 dev 模式 CSP 报错：React 开发模式需要 `eval()`，`src/proxy.ts` 的 `script-src` 现仅在 `NODE_ENV=development` 时附加 `'unsafe-eval'`，生产保持严格（nonce + strict-dynamic）。用户 dev 服务器（localhost:8765）实测：登录页渲染、控制台零错误。
+- 新增 `.github/workflows/ci.yml`：push 到 main 或 `v*` 标签时依次跑 `pnpm test` → `pnpm build` → `pnpm smoke`，通过后 buildx 构建 linux/amd64+linux/arm64 镜像并推送 `ghcr.io/thqddqht/subscription-ledger`（分支打 `main`、标签打 semver、另有 sha 标签）；PR 只跑测试不推镜像。镜像本身尚未实际构建验证，首次以 CI 结果为准。
+
 ## 2026-09-12 续费历史与实付金额
 
 - 用户从功能建议中选定「续费历史展示与撤销」「续费时记录实付金额」。后端：`renewals` 表新增可空列 `amount_cents`、`recorded_at`，旧库首次打开自动 `ALTER TABLE` 补列（幂等）；续费接口接受可选 `amount`（与订阅金额同一校验规则，缺省取当前每期金额），写入实付金额与 Asia/Shanghai 记录时间，返回 `renewal_id`；新增 `GET /api/items/<id>/renewals`（最新在前，服务端标记 `undoable`）与 `POST /api/items/<id>/renewals/<rid>/undo`（需 `confirm:true`；只允许最近一次且 `next_date` 仍等于当前计划日期，否则 400 并说明原因；退回 `previous_date`、删除该条历史，不改金额、状态与锚点；不限制状态）。导出改为按写入顺序输出历史并附 `amount`/`amount_cents`/`recorded_at`；恢复以 `amount_cents` 为准，缺失或 null 视为未记录，非法分值、布尔、超限或不可解析时间戳一律拒绝且不改库。`version=1` 不变。

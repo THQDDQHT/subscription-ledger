@@ -7,3 +7,11 @@ data/
 .git/
 *.sqlite3
 artifacts/
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.DS_Store
+docs/
+tests/
+*.md

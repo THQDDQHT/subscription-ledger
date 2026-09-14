@@ -2,7 +2,7 @@
 
 ## 2026-09-12 全屏工作台方案
 
-用户确认并已实施：固定导航、全宽清单、独立列表滚动、宽屏并排详情。近期、全部、备份分为独立视图，全部页隐藏统计；侧栏可折叠，平板自动紧凑，手机采用底部导航与原生模态详情。URL hash 保留视图和选中记录。此决策取代下文早期的居中或双栏布局描述。继续使用原生前端，无新增构建步骤或运行依赖；CSP 保持不变。最新验收见 docs/acceptance.md。
+用户确认并已实施：固定导航、全宽清单、独立列表滚动、宽屏并排详情。近期、全部、备份分为独立视图，全部页隐藏统计；侧栏可折叠，平板自动紧凑，手机采用底部导航与原生模态详情。URL hash 保留视图和选中记录。此决策取代下文早期的居中或双栏布局描述。2026-09-14 起前端为 React + Tailwind（1:1 平移原设计），构建与安全细节见 Stack 节。最新验收见 docs/acceptance.md。
 
 <!-- impeccable:product-schema 1 -->
 
@@ -12,15 +12,15 @@ web
 
 ## Stack
 
-既有代码库已确定：Flask 3.1 + SQLite + 原生 HTML/CSS/JS，无 package.json、无 JS 依赖，运行时仅 3 个 Python 依赖。
+**2026-09-14 起**：全栈 TypeScript —— Next.js 16（App Router，客户端 SPA + Route Handlers）+ better-sqlite3 + Tailwind v4 + shadcn/ui（Radix）；pnpm 11 + Node 24；Vitest 取代 pytest。原 Flask 版（Flask 3.1 + SQLite + 原生 HTML/CSS/JS，零 JS 依赖）已随重写移除，行为契约与数据格式不变。
 
-**2026-09-10 用户确认松绑：允许引入前端构建步骤。** 这是对 `README.md`（"Node 仅用于前端回归测试"）与 `docs/requirements.md`（"轻量后端 + SQLite + 原生 HTML/CSS/JS"）既有约束的一次变更，三条后果尚未决定，未落地前保持旧约束有效：
+2026-09-10 松绑决策的三条后果现已全部落地：
 
-1. **CSP 不得松绑。** `app.py:92` 当前为 `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'`，无 `'unsafe-inline'`。打包产物必须外链 CSS/JS，不得内联 `<style>`/`<script>`，不得依赖 `'unsafe-inline'`。
-2. **交付面从"拷贝 4 个文件"变成"需要构建产物"。** `Dockerfile` 目前只 `COPY static` / `COPY templates`，需增加构建阶段或将产物提交入库，否则镜像里是旧界面。
-3. **零 JS 依赖的供应链属性会失去。** 该应用持有个人财务数据，当前 JS 依赖数为 0；引入打包器会带入数百个传递依赖。这是用攻击面换交付速度，属于需要知情同意的取舍。
+1. **CSP**：`script-src` 保持严格（每请求 nonce + `strict-dynamic`，见 `src/proxy.ts` 与 `src/app/layout.tsx` 的主题脚本）；`style-src` 放宽为 `'self' 'unsafe-inline'`——React/Radix 的样式属性需要，已获用户批准。其余指令不变，无外部资源。
+2. **交付面**：`Dockerfile` 为多阶段构建（Node 构建阶段产出 `.next/standalone`，运行阶段为 Node 运行时）。
+3. **供应链**：JS 依赖由 0 变为完整的 Next 工具链，以 lockfile（`pnpm-lock.yaml`）+ pnpm `allowBuilds` 白名单（仅 better-sqlite3、esbuild 允许安装期脚本）控制；这是已知情同意的取舍。
 
-已决定：不引入 CDN（`README.md` 的"不依赖外部资源"与 CSP 双重约束）。字体如自托管须走 `'self'`。
+已决定：不引入 CDN（`README.md` 的"不依赖外部资源"与 CSP 双重约束）。字体为系统栈，不自托管。
 
 ## Users
 
