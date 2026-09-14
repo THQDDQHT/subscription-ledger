@@ -62,7 +62,15 @@ def main():
             status,q,_=request('/api/items','POST',quarterly,token);assert status==201;qid=q['id']
             assert request('/api/items/'+qid+'/renew','POST',{'actual_date':'2024-01-31','next_date':'2024-04-30','confirm':True},token)[0]==200
             assert next(r for r in request('/api/items')[1] if r['id']==qid)['suggested_next']=='2024-07-31'
+            status,history,_=request('/api/items/'+ident+'/renewals');assert status==200 and history[0]['amount']=='20.01' and history[0]['undoable'] is True
+            assert request('/api/items/'+ident+'/renew','POST',{'actual_date':'2024-02-29','next_date':'2024-03-31','amount':'21.00','confirm':True},token)[0]==200
+            history=request('/api/items/'+ident+'/renewals')[1];assert [h['amount'] for h in history]==['21.00','20.01'] and [h['undoable'] for h in history]==[True,False]
+            assert request('/api/items/'+ident+'/renewals/'+history[1]['id']+'/undo','POST',{'confirm':True},token)[0]==400
+            status,undone,_=request('/api/items/'+ident+'/renewals/'+history[0]['id']+'/undo','POST',{'confirm':True},token);assert status==200 and undone['next_date']=='2024-02-29'
+            current=next(r for r in request('/api/items')[1] if r['id']==ident);assert current['next_date']=='2024-02-29' and current['suggested_next']=='2024-03-31' and current['amount']=='20.01'
+            assert len(request('/api/items/'+ident+'/renewals')[1])==1;checks.append('HTTP 续费实付金额/历史列表/撤销最近一次')
             original=request('/api/export')[1]
+            assert original['renewals'][0]['amount_cents']==2001 and original['renewals'][0]['recorded_at']
             assert request('/api/restore','POST',{'confirm':True,'backup':{'bad':1}},token)[0]==400
             assert request('/api/export')[1]==original
             assert request('/api/restore','POST',{'confirm':True,'backup':original},token)[0]==200

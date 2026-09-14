@@ -5,6 +5,7 @@ const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'
 let csrf='', items=[], stats={}, viewKey='recent', filterKey='all', focusKey='', keyword='', sortKey='date';
 const collapsedGroups=new Set(['recent:month','all:cancelled','all:ended']);
 let reportTimer, selectedId='', displayedDetailId='', pendingBackup=null;
+const historyCache=new Map(); // 订阅 ID → 续费历史请求；load() 与会话失效时清空
 
 function text(tag, value, cls) { const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls; return e; }
 function icon(id) {
@@ -44,7 +45,7 @@ async function api(url, method='GET', body) {
   if(!response.ok){
     if(response.status===401 && url!=='/api/login'){
       csrf='';items=[];stats={};focusKey='';filterKey='all';viewKey='recent';keyword='';sortKey='date';collapsedGroups.clear();
-      selectedId='';displayedDetailId='';history.replaceState(null,'',location.pathname+location.search);
+      selectedId='';displayedDetailId='';historyCache.clear();history.replaceState(null,'',location.pathname+location.search);
       $('#search').value='';$('#sort').value='date';$('#filter').value='all';
       $('#ledger').hidden=true; $('#login-panel').hidden=false; $('#logout').hidden=true; $('#logout-mobile').hidden=true;
       for(const s of ['#items','#detail-body','#detail-actions'])$(s).replaceChildren();
@@ -220,7 +221,7 @@ async function load() {
     throw e;
   }
   clearTimeout(pending);setLoading(false);
-  [items,stats]=result;
+  [items,stats]=result;historyCache.clear();
   $('#budget').replaceChildren(moneyNode(stats.monthly_budget));$('#forecast').replaceChildren(moneyNode(stats.forecast_30));
   const overdue=items.filter(r=>isActive(r)&&daysUntil(r.next_date)<0).length;
   $('#overdue-count').textContent=`${overdue} 项`;$('#overdue-count').classList.toggle('is-zero',overdue===0);
@@ -237,6 +238,60 @@ function syncDetailMode() {
   d.dataset.modal=String(modal);
   if(modal)d.showModal();else d.show();
 }
+/* 续费历史：只读账页，最近一次且计划日期未被改动的记录可撤销；金额缺失的早期记录如实标为未记录。 */
+function fetchHistory(id) {
+  if(!historyCache.has(id)){const pending=api(`/api/items/${id}/renewals`).catch(e=>{historyCache.delete(id);throw e;});historyCache.set(id,pending);}
+  return historyCache.get(id);
+}
+function historySummary(rows) {
+  const known=rows.filter(h=>h.amount_cents!==null&&h.amount_cents!==undefined);
+  let s=`共 ${rows.length} 次`;
+  if(known.length)s+=` · 实付合计 ${moneyCents(known.reduce((n,h)=>n+h.amount_cents,0))}`;
+  if(known.length<rows.length)s+=`（${rows.length-known.length} 次早期记录未含金额，不计入）`;
+  return s;
+}
+function recordedAt(iso) { return iso?iso.slice(0,16).replace('T',' '):''; }
+async function undoRenewal(r,h) {
+  const paid=h.amount?`，实付 ${money(h.amount)}`:'';
+  const ok=await confirmDialog({title:`撤销「${r.name}」最近一次续费？`,body:`计划日期将从 ${friendlyDate(h.next_date)} 退回 ${friendlyDate(h.previous_date)}；这条续费记录（${friendlyDate(h.actual_date)} 续费${paid}）会被删除。`,note:'不会更改订阅的每期金额、状态或日期锚点。',accept:'撤销续费'});
+  if(!ok)return;
+  clearReport();await api(`/api/items/${r.id}/renewals/${h.id}/undo`,'POST',{confirm:true});
+  focusKey=`${r.id}:detail`;
+  try{await load();}catch(error){reportError('已撤销续费，但列表刷新失败：'+error.message);return;}
+  reportOk(`已撤销「${r.name}」的续费 · 计划日期退回 ${h.previous_date}（${friendlyDate(h.previous_date)}）`);
+}
+function historyEntry(r,h,index) {
+  const li=text('li','','history-entry');
+  const when=text('strong','实际续费 ');when.append(dateNode(h.actual_date));
+  const amount=text('span','','history-amount');
+  if(h.amount)amount.append(moneyNode(h.amount));else{amount.textContent='未记录金额';amount.classList.add('unknown');}
+  li.append(when,amount,text('span',`原计划 ${friendlyDate(h.previous_date)} → 下次 ${friendlyDate(h.next_date)}`,'history-sub'));
+  if(h.recorded_at)li.append(text('span',`记录于 ${recordedAt(h.recorded_at)}`,'history-note'));
+  if(h.undoable){const b=action('撤销这次续费',()=>undoRenewal(r,h),'ghost compact','undo',`${r.id}:undo`);b.setAttribute('aria-label',`撤销 ${r.name} 最近一次续费`);li.append(b);}
+  else if(index===0)li.append(text('span','此后计划日期已被编辑，不能撤销；如需调整请直接编辑日期。','history-note'));
+  return li;
+}
+function renderHistory(r,section,rows) {
+  section.replaceChildren();
+  const head=text('h3','续费历史');
+  if(rows.length)head.append(text('span',historySummary(rows),'history-summary'));
+  section.append(head);
+  if(!rows.length){section.append(text('p','尚无续费记录。记录续费后，实付金额与日期会留在这里。','history-status'));return;}
+  const list=text('ol','','history-list');
+  rows.forEach((h,index)=>list.append(historyEntry(r,h,index)));
+  section.append(list);
+}
+async function loadHistory(r,section) {
+  let rows;
+  try{rows=await fetchHistory(r.id);}
+  catch(e){
+    if(!section.isConnected)return;
+    const status=section.querySelector('.history-status');status.textContent=`续费历史加载失败：${e.message||e}`;status.classList.add('error');
+    status.append(action('重试',()=>{section.replaceChildren(text('h3','续费历史'),text('p','正在加载续费历史…','history-status'));return loadHistory(r,section);},'ghost compact'));
+    return;
+  }
+  if(section.isConnected&&selectedId===r.id)renderHistory(r,section,rows);
+}
 function renderDetail() {
   const r=items.find(item=>item.id===selectedId);const d=$('#detail');
   $('#board').classList.toggle('has-detail',!!r);
@@ -252,6 +307,7 @@ function renderDetail() {
   for(const [label,value] of [['续费方式',r.auto_renew?'自动续费已开':'手动续费'],['计入预算',isActive(r)?'是':'否'],['服务可用截止日',r.end_date?`${r.end_date} · ${friendlyDate(r.end_date)}`:'未填写']])list.append(text('dt',label),text('dd',value));body.append(list);
   if(r.url){const a=text('a','前往管理订阅','detail-link');a.href=r.url;a.target='_blank';a.rel='noopener noreferrer';a.append(icon('external'));body.append(a);}
   body.append(text('h3','备注'),text('p',r.notes||'暂无备注','detail-notes'));
+  const history=text('section','','detail-history');history.setAttribute('aria-label','续费历史');history.append(text('h3','续费历史'),text('p','正在加载续费历史…','history-status'));body.append(history);loadHistory(r,history);
   const remove=action('删除订阅',async()=>{
     const ok=await confirmDialog({title:`删除「${r.name}」？`,body:'这条订阅及其全部续费历史将被删除，无法撤销。',note:'如果只是停用，可改为「已取消续费」或「已结束」保留记录。',accept:'删除订阅'});
     if(!ok)return;
@@ -272,6 +328,7 @@ function renew(r) {
   const f=$('#renew-form');f.reset();f.elements.id.value=r.id;
   f.elements.actual_date.value=stats.today;f.elements.actual_date.max=stats.today;
   f.elements.next_date.value=r.suggested_next;
+  f.elements.amount.value=r.amount;
   $('#renew-name').textContent=r.name;
   // 显示被替换的原值，避免用户必须记住背后卡片上的日期
   $('#renew-diff').textContent=`当前计划日期 ${r.next_date}（${friendlyDate(r.next_date)}）· 每期 ${money(r.amount)}（${cycleLabel(r)}）`;
@@ -281,7 +338,7 @@ function renew(r) {
 async function submitGuard(form, fn, target) {const b=form.querySelector('button[type="submit"]');const original=b.textContent;b.disabled=true;b.textContent='保存中…';target.textContent='';try{await fn();}catch(e){target.textContent=e.message;}finally{b.disabled=false;b.textContent=original;}}
 $('#login-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{csrf=(await api('/api/session')).csrf;const result=await api('/api/login','POST',{password:e.target.elements.password.value});csrf=result.csrf;e.target.reset();$('#login-panel').hidden=true;$('#ledger').hidden=false;$('#logout').hidden=false;$('#logout-mobile').hidden=false;await load();},$('#message'));});
 $('#item-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{const f=e.target.elements;const r={};for(const key of ['name','amount','cycle','next_date','status','url','notes'])r[key]=f[key].value;r.days=r.cycle==='days'?Number(f.days.value):null;r.end_date=f.end_date.value||null;r.auto_renew=f.auto_renew.checked;const editing=f.id.value;clearReport();await api(editing?`/api/items/${editing}`:'/api/items',editing?'PUT':'POST',r);$('#editor').close();focusKey=editing?`${editing}:detail`:'';try{await load();}catch(error){reportError('已保存，但列表刷新失败：'+error.message);return;}reportOk(editing?`已保存「${r.name}」`:`已新增「${r.name}」`);},$('#edit-error'));});
-$('#renew-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{const f=e.target.elements;const r=items.find(x=>x.id===f.id.value);clearReport();await api(`/api/items/${f.id.value}/renew`,'POST',{actual_date:f.actual_date.value,next_date:f.next_date.value,confirm:f.confirm.checked});$('#renew-dialog').close();focusKey=`${f.id.value}:renew`;try{await load();}catch(error){reportError('已记录续费，但列表刷新失败：'+error.message);return;}reportOk(`已续费「${r?r.name:'订阅'}」· 下次 ${f.next_date.value}（${friendlyDate(f.next_date.value)}）`);},$('#renew-error'));});
+$('#renew-form').addEventListener('submit',e=>{e.preventDefault();submitGuard(e.target,async()=>{const f=e.target.elements;const r=items.find(x=>x.id===f.id.value);clearReport();await api(`/api/items/${f.id.value}/renew`,'POST',{actual_date:f.actual_date.value,amount:f.amount.value,next_date:f.next_date.value,confirm:f.confirm.checked});$('#renew-dialog').close();focusKey=`${f.id.value}:renew`;try{await load();}catch(error){reportError('已记录续费，但列表刷新失败：'+error.message);return;}reportOk(`已续费「${r?r.name:'订阅'}」· 实付 ${money(f.amount.value)} · 下次 ${f.next_date.value}（${friendlyDate(f.next_date.value)}）`);},$('#renew-error'));});
 $('#item-form').elements.cycle.addEventListener('change',cycleField);
 $('#add').addEventListener('click',()=>edit(null));
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',()=>$('#'+b.dataset.close).close());

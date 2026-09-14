@@ -1,11 +1,33 @@
 """Pure domain functions. Windows are [today, today + N days)."""
 import calendar
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlsplit
 
 STATES = {'active', 'cancelling', 'cancelled', 'ended'}
+AMOUNT_RE = re.compile(r'(0|[1-9]\d{0,7})(\.\d{1,2})?')
+MAX_CENTS = 99_999_999_99  # 八位整数 + 两位小数
+
+def parse_amount(value):
+    if not isinstance(value, str) or not AMOUNT_RE.fullmatch(value):
+        raise ValueError('金额须为非负人民币数字，最多两位小数、八位整数')
+    return int(Decimal(value)*100)
+
+def parse_cents(value):
+    """Restore-side check for stored integer cents; bool is deliberately rejected."""
+    if type(value) is not int or not 0 <= value <= MAX_CENTS:
+        raise ValueError('金额（分）无效')
+    return value
+
+def parse_timestamp(value):
+    """ISO 8601 record time; normalized to seconds so exports round-trip."""
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError('记录时间格式不正确')
+    try:
+        return datetime.fromisoformat(value).isoformat(timespec='seconds')
+    except ValueError:
+        raise ValueError('记录时间格式不正确') from None
 
 def parse_date(value):
     if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
@@ -29,10 +51,7 @@ def validate(data, previous=None, restoring=False):
         u = urlsplit(out['url'])
         if u.scheme not in ('http','https') or not u.hostname or u.username or u.password or any(c.isspace() for c in out['url']):
             raise ValueError('管理链接仅支持无凭证的 http/https URL')
-    amount = data.get('amount')
-    if not isinstance(amount,str) or not re.fullmatch(r'(0|[1-9]\d{0,7})(\.\d{1,2})?',amount):
-        raise ValueError('金额须为非负人民币数字，最多两位小数、八位整数')
-    out['amount_cents'] = int(Decimal(amount)*100)
+    out['amount_cents'] = parse_amount(data.get('amount'))
     out['amount'] = money(out['amount_cents'])
     cycle = data.get('cycle')
     if cycle not in ('monthly','quarterly','yearly','days'): raise ValueError('周期不正确')

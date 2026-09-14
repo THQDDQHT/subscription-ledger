@@ -56,7 +56,7 @@ web
 
 ## Capabilities and Constraints
 
-**已确认功能**：密码登录（scrypt 哈希，12–1024 字符）；订阅 CRUD（名称、每期金额、月/季/年/自定义天数周期、下次日期、自动续费标识、状态、服务截止日、管理链接、备注）；手工确认续费并保留锚点；周期预测；JSON 导出与严格校验的恢复。
+**已确认功能**：密码登录（scrypt 哈希，12–1024 字符）；订阅 CRUD（名称、每期金额、月/季/年/自定义天数周期、下次日期、自动续费标识、状态、服务截止日、管理链接、备注）；手工确认续费并保留锚点，同时记录实付金额与记录时间；详情内的续费历史与“撤销最近一次续费”；周期预测；JSON 导出与严格校验的恢复。
 
 **技术约束**：SQLite 持久化，跨设备共用；链接仅接受无凭证 http/https；请求体上限 2 MiB；登录限速（每 IP 15 分钟 5 次，反代不信任 X-Forwarded-For）；HttpOnly + SameSite=Strict 会话，12 小时有效；写请求校验 CSRF；CSP 见 Stack 节。
 
@@ -77,7 +77,7 @@ web
 
 - `README.md`、`docs/requirements.md`、`docs/acceptance.md`、`docs/plans/`：产品边界、使用口径、验收与安装记录。
 - `docs/plans/mvp.md`、`docs/plans/quarterly-layout.md`：既有迭代记录。
-- `tests/test_ledger.py`、`test_quarterly.py`、`test_extra.py`、`test_regressions.py`：领域与回归覆盖。
+- `tests/test_ledger.py`、`test_quarterly.py`、`test_extra.py`、`test_regressions.py`、`test_history.py`：领域与回归覆盖。
 - `scripts/http_smoke.py`、`scripts/session_regression.cjs`、`scripts/copy_to_host.py`：端到端与前端会话回归。
 - `.impeccable/critique/2026-09-10T08-27-29Z__templates-index-html.md`：本轮评审（18/40）与实测证据。
 - `.impeccable/review/*.png`：1440×900 / 390×844 实测截图。
@@ -114,3 +114,7 @@ web
 ## 2026-09-12 备份页
 
 用户要求优化备份页外观。现为导出 / 恢复两张卡片：导出卡片给出条数、文件名与本浏览器上次导出时间；恢复卡片为拖放区，选中即本地解析出摘要，不合格文件不允许进入确认。「不自动扣款、不取消、不提醒」的声明保留为页面底部脚注。
+
+## 2026-09-12 续费历史与实付金额
+
+用户从功能建议中选定前两项并已实施：续费历史一直只写不读，现在在详情页展示；续费时记录实付金额与记录时间。决策要点：实付金额默认取当前每期金额、可在续费弹窗改为真实支付额，但只进历史，不改订阅金额（涨价仍靠编辑订阅，避免两处口径混淆）；升级前的历史记录没有金额与时间，界面标为“未记录”并从合计中排除，不用当前金额回填冒充。撤销只允许最近一次、且此后计划日期未被编辑过的续费，退回原计划日并删除该条历史，不动金额、状态与锚点；不满足条件时说明原因并指向“直接编辑日期”。撤销不要求状态为使用中，因为它是纠正记录而非确认付款。备份 `version=1` 不变，历史新增 `amount_cents`、`recorded_at` 两个可空字段，旧备份可恢复；旧库首次打开自动补列。前端仍为原生实现，无新增依赖；CSP 不变。本轮结果见 docs/acceptance.md。

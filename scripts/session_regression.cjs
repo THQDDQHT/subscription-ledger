@@ -9,7 +9,7 @@ const source=fs.readFileSync('static/app.js','utf8').split("$('#login-form').add
 vm.runInContext(source,context);
 (async()=>{
  for(const failRefresh of [false,true]){
-  vm.runInContext("csrf='stale';items=[{name:'secret'}];stats={today:'secret'};selectedId='private-id'",context);
+  vm.runInContext("csrf='stale';items=[{name:'secret'}];stats={today:'secret'};selectedId='private-id';historyCache.set('private-id',Promise.resolve([{amount:'1.00'}]))",context);
   responses=[{status:401,body:{error:'expired'}},failRefresh?new Error('offline'):{status:200,body:{csrf:'fresh'}}];
   await assert.rejects(vm.runInContext("api('/api/items')",context));
   assert.equal(vm.runInContext('csrf',context),failRefresh?'':'fresh');
@@ -24,6 +24,7 @@ vm.runInContext(source,context);
   for(const key of ['#detail-title','#detail-body','#detail-actions','#recent-count','#all-count','#result-count','#plan-preview'])assert.equal(node(key).textContent,'');
   assert.equal(node('#search').value,'');
   assert.equal(vm.runInContext('items.length',context),0);
+  assert.equal(vm.runInContext('historyCache.size',context),0,'renewal history cache must be dropped with the session');
  }
- console.log('PASS expired session refreshes CSRF; offline failure clears private DOM/dialogs/state');
+ console.log('PASS expired session refreshes CSRF; offline failure clears private DOM/dialogs/state/history cache');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -2056,3 +2056,83 @@ dialog form,.drawer-layout {
     box-shadow:none
   }
 }
+
+/* ---------- 详情：续费历史 ---------- */
+.detail-history {
+  margin-top:22px;
+  padding-top:18px;
+  border-top:1px solid var(--line)
+}
+.detail-history h3 {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:10px;
+  flex-wrap:wrap
+}
+.history-summary {
+  font-size:12px;
+  font-weight:500;
+  color:var(--muted);
+  font-variant-numeric:tabular-nums
+}
+.history-list {
+  list-style:none;
+  margin:10px 0 0;
+  padding:0;
+  display:grid;
+  gap:8px
+}
+.history-entry {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:2px 12px;
+  align-items:baseline;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--card);
+  font-size:13px
+}
+.history-entry strong {
+  font-weight:600;
+  overflow-wrap:anywhere
+}
+.history-amount {
+  font-weight:600;
+  text-align:right;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums
+}
+.history-amount.unknown {
+  font-size:12px;
+  font-weight:500;
+  color:var(--muted)
+}
+.history-sub,.history-note {
+  grid-column:1/-1;
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.55;
+  font-variant-numeric:tabular-nums
+}
+.history-entry .compact {
+  grid-column:1/-1;
+  justify-self:start;
+  margin-top:6px;
+  min-height:var(--tap)
+}
+/* 鼠标环境才收紧为紧凑尺寸；触屏保持 44px 触控高度。 */
+@media (hover:hover) and (pointer:fine) {
+  .history-entry .compact {
+    min-height:32px
+  }
+}
+.history-status {
+  margin-top:8px;
+  font-size:12.5px;
+  color:var(--muted)
+}
+.history-status button {
+  margin-left:8px
+}

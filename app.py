@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import click
 from flask import Flask, g, jsonify, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
-from domain import validate, advance, summary, parse_date
+from domain import validate, advance, summary, parse_date, parse_amount, parse_cents, parse_timestamp, money
 
 
 def db():
@@ -38,9 +38,13 @@ def create_app(config=None):
     with app.app_context():
         db().executescript('''
         CREATE TABLE IF NOT EXISTS subscriptions (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS renewals (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, actual_date TEXT NOT NULL, previous_date TEXT NOT NULL, next_date TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS renewals (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, actual_date TEXT NOT NULL, previous_date TEXT NOT NULL, next_date TEXT NOT NULL, amount_cents INTEGER, recorded_at TEXT);
         CREATE TABLE IF NOT EXISTS attempts (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, start REAL NOT NULL);
         ''')
+        # 旧库迁移：早期续费历史没有金额与记录时间，补列后保持 NULL，表示“未记录”。
+        columns={row['name'] for row in db().execute('PRAGMA table_info(renewals)')}
+        for name,kind in (('amount_cents','INTEGER'),('recorded_at','TEXT')):
+            if name not in columns: db().execute(f'ALTER TABLE renewals ADD COLUMN {name} {kind}')
         db().commit()
         os.chmod(root/'ledger.sqlite3',0o600)
         db().close(); g.pop('db',None)
@@ -68,10 +72,20 @@ def create_app(config=None):
         if not isinstance(data,dict): raise ValueError('请求必须为 JSON 对象')
         return data
 
+    def with_amount(h):
+        h=dict(h); h['amount']=money(h['amount_cents']) if h['amount_cents'] is not None else None; return h
+
     def export_data():
+        # 续费历史按写入顺序导出，恢复时按列表顺序写回，早期无时间戳的记录仍保持先后关系。
         return {'format':'subscription-ledger','version':1,'currency':'CNY',
                 'items':sorted(rows(),key=lambda r:r['id']),
-                'renewals':[dict(r) for r in db().execute('SELECT * FROM renewals ORDER BY id')]}
+                'renewals':[with_amount(h) for h in db().execute('SELECT * FROM renewals ORDER BY rowid')]}
+
+    def history_view(r):
+        """Newest first. Only the latest confirmation whose next_date still matches the plan can be undone."""
+        rows=[with_amount(h) for h in db().execute('SELECT * FROM renewals WHERE subscription_id=? ORDER BY (recorded_at IS NULL), recorded_at DESC, rowid DESC',(r['id'],))]
+        for index,h in enumerate(rows): h['undoable']=index==0 and h['next_date']==r['next_date']
+        return rows
 
     @app.before_request
     def security():
@@ -171,10 +185,36 @@ def create_app(config=None):
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
         if actual>today: raise ValueError('实际续费日期不能在未来')
         if nxt<=actual or nxt<=parse_date(r['next_date']): raise ValueError('下一次日期须晚于实际续费日期和原计划日期')
-        conn.execute('INSERT INTO renewals VALUES (?,?,?,?,?)',(secrets.token_hex(16),ident,actual.isoformat(),r['next_date'],nxt.isoformat()))
+        # 实付金额默认取当前每期金额；传入 amount 时按订阅金额同样的规则校验。不改订阅本身的金额。
+        cents=r['amount_cents'] if data.get('amount') is None else parse_amount(data.get('amount'))
+        recorded=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(timespec='seconds'); rid=secrets.token_hex(16)
+        conn.execute('INSERT INTO renewals (id,subscription_id,actual_date,previous_date,next_date,amount_cents,recorded_at) VALUES (?,?,?,?,?,?,?)',
+                     (rid,ident,actual.isoformat(),r['next_date'],nxt.isoformat(),cents,recorded))
         r.pop('id'); r['next_date']=nxt.isoformat()
         conn.execute('UPDATE subscriptions SET payload=? WHERE id=?',(json.dumps(r,ensure_ascii=False),ident)); conn.commit()
-        return jsonify(ok=True)
+        return jsonify(ok=True,renewal_id=rid)
+
+    @app.get('/api/items/<ident>/renewals')
+    def list_renewals(ident):
+        r=get_row(ident)
+        if r is None: return jsonify(error='记录不存在'),404
+        return jsonify(history_view(r))
+
+    @app.post('/api/items/<ident>/renewals/<rid>/undo')
+    def undo_renewal(ident,rid):
+        conn=db(); conn.execute('BEGIN IMMEDIATE'); r=get_row(ident)
+        if not r: conn.rollback(); return jsonify(error='记录不存在'),404
+        data=payload()
+        if data.get('confirm') is not True: raise ValueError('撤销续费需要明确确认')
+        rows=history_view(r); target=next((h for h in rows if h['id']==rid),None)
+        if target is None: conn.rollback(); return jsonify(error='续费记录不存在'),404
+        if rows[0]['id']!=rid: raise ValueError('只能撤销最近一次续费')
+        if not target['undoable']: raise ValueError('续费后计划日期已被修改，无法撤销；如需调整请直接编辑日期')
+        # 撤销只退回计划日期并删除这条历史；金额、状态与日期锚点都不动，与“确认续费不重置锚点”对称。
+        conn.execute('DELETE FROM renewals WHERE id=?',(rid,))
+        r.pop('id'); r['next_date']=target['previous_date']
+        conn.execute('UPDATE subscriptions SET payload=? WHERE id=?',(json.dumps(r,ensure_ascii=False),ident)); conn.commit()
+        return jsonify(ok=True,next_date=target['previous_date'])
 
     @app.get('/api/export')
     def export():
@@ -205,7 +245,10 @@ def create_app(config=None):
             if ident in history_ids or sub not in ids: raise ValueError('续费历史引用/ID 无效')
             actual=parse_date(h.get('actual_date')); prev=parse_date(h.get('previous_date')); nxt=parse_date(h.get('next_date'))
             if nxt<=actual or nxt<=prev: raise ValueError('续费历史日期无效')
-            history_ids.add(ident); prepared_history.append((ident,sub,actual.isoformat(),prev.isoformat(),nxt.isoformat()))
+            # 早期备份没有金额与记录时间；缺失或 null 视为未记录，不用当前金额冒充。
+            cents=parse_cents(h['amount_cents']) if h.get('amount_cents') is not None else None
+            recorded=parse_timestamp(h['recorded_at']) if h.get('recorded_at') is not None else None
+            history_ids.add(ident); prepared_history.append((ident,sub,actual.isoformat(),prev.isoformat(),nxt.isoformat(),cents,recorded))
         # Lock out other writers BEFORE backing up the same committed snapshot.
         conn=db(); conn.execute('BEGIN IMMEDIATE')
         directory=root/'backups'; directory.mkdir(exist_ok=True,mode=0o700)
@@ -216,7 +259,7 @@ def create_app(config=None):
                 source.backup(dest)
             conn.execute('DELETE FROM renewals'); conn.execute('DELETE FROM subscriptions')
             conn.executemany('INSERT INTO subscriptions VALUES (?,?)',prepared)
-            conn.executemany('INSERT INTO renewals VALUES (?,?,?,?,?)',prepared_history)
+            conn.executemany('INSERT INTO renewals (id,subscription_id,actual_date,previous_date,next_date,amount_cents,recorded_at) VALUES (?,?,?,?,?,?,?)',prepared_history)
             conn.commit()
         except Exception:
             conn.rollback(); raise

@@ -47,3 +47,12 @@ assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-13'))")),{t
 assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-18'))")),{text:'还剩 6 天',cls:'soon'});
 assert.deepEqual(JSON.parse(run("JSON.stringify(relativeDay('2026-09-19'))")),{text:'还剩 7 天',cls:''});
 console.log('PASS money grouping, Chinese dates with weekday, relative day boundaries');
+
+// 续费历史：合计只累加记录了金额的条目，早期无金额记录如实说明；记录时间只显示到分钟。
+assert.equal(run("historySummary([])"),'共 0 次');
+assert.equal(run("historySummary([{amount_cents:1230},{amount_cents:3050}])"),'共 2 次 · 实付合计 ¥42.80');
+assert.equal(run("historySummary([{amount_cents:1230},{amount_cents:null}])"),'共 2 次 · 实付合计 ¥12.30（1 次早期记录未含金额，不计入）');
+assert.equal(run("historySummary([{amount_cents:null}])"),'共 1 次（1 次早期记录未含金额，不计入）');
+assert.equal(run("recordedAt('2026-09-12T20:15:30+08:00')"),'2026-09-12 20:15');
+assert.equal(run("recordedAt(null)"),'');
+console.log('PASS renewal history summary and recorded time formatting');
