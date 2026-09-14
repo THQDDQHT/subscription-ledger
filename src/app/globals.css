@@ -541,6 +541,7 @@
     border:0;
     border-radius:var(--r-4);
     padding:0;
+    margin:auto;
     width:min(560px,calc(100% - 24px));
     max-height:90dvh;
     box-shadow:var(--shadow-lg)

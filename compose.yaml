@@ -1,6 +1,7 @@
 services:
   ledger:
-    build: .
+    # 直接使用 CI 构建的镜像；本地构建则改回 build: .
+    image: ghcr.io/thqddqht/subscription-ledger:main
     ports:
       - "127.0.0.1:${LEDGER_PORT:-8765}:8000"
     environment:
