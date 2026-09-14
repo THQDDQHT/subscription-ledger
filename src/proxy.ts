@@ -38,6 +38,6 @@ export default function proxy(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  // 带哈希的静态资源与图标由 next.config.ts 的 immutable 缓存头接管。
+  // Next 静态资源缓存由框架管理，图标缓存由 next.config.ts 设置。
   matcher: ['/((?!_next/static|icon.svg|_next/image).*)'],
 };
