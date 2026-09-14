@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: 安装 pnpm（版本取自 packageManager 字段）
+        uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-      - name: 启用 pnpm（版本取自 packageManager 字段）
-        run: corepack enable
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
       - name: 单元与 API 测试
