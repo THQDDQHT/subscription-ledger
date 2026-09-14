@@ -6,18 +6,15 @@
 
 源码及隔离验收，不是公网部署；未配置 Nginx、域名或常驻服务。Docker 配置已提供但未实际构建/启动。手机响应式样式已实现，真实手机浏览器验收仍需完成。正式上线前须批准端口、域名、HTTPS、数据目录和回滚方案。
 
-## 本机运行（Python 3.12+）
+## 本机运行（uv，Python 3.12+）
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-# 交互输入，不把明文密码放入命令行或环境变量：
-.venv/bin/flask --app app:create_app init-password
-# 仅本机可访问，Ctrl-C 停止：
-.venv/bin/gunicorn --bind 127.0.0.1:8765 --workers 1 --threads 4 'app:create_app()'
+uv sync                     # 建 .venv 并安装依赖（含 pytest）
+uv run flask --app app:create_app init-password   # 首次设置登录密码，交互输入
+uv run serve.py             # 启动，默认 http://127.0.0.1:8765，仅本机可访问，Ctrl-C 停止
 ```
 
-如使用 uv，可用 `uv venv .venv`、`uv pip install --python .venv/bin/python -r requirements-dev.txt`。运行时只需 `requirements.txt`，pytest 是开发依赖；Node 仅用于前端回归测试。
+`uv run serve.py 9000` 可换端口。依赖以 `pyproject.toml` 与 `uv.lock` 为准；`requirements.txt` 仅供 Dockerfile 使用，须与 pyproject 保持一致。不用 uv 时可 `python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`，再用 `.venv/bin/python serve.py`。Node 仅用于前端回归测试。
 
 默认数据目录为项目下 `data/`。旧版本的数据库首次被新版打开时会自动为续费历史表补上金额与记录时间两列，旧记录保持空值，无需手工迁移。可设置 `LEDGER_DATA_DIR` 为专用绝对路径；创建目录默认 0700，数据库、密码哈希及会话密钥 0600。不要把数据目录置于静态资源目录或提交版本库。密码 12–1024 字符，以 scrypt 哈希存储。首次未初始化时不能登录。更换密码后须重启所有应用进程，轮换的会话密钥才会使旧会话失效。密码不包含在 JSON 备份内。
 
@@ -46,8 +43,8 @@ python3 -m venv .venv
 ## 自动验收
 
 ```sh
-.venv/bin/python -m pytest -q
-.venv/bin/python scripts/http_smoke.py
+uv run pytest -q
+uv run scripts/http_smoke.py
 node scripts/session_regression.cjs
 node scripts/ui_regression.cjs
 ```
