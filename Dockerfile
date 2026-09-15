@@ -18,5 +18,10 @@ COPY --from=build --chown=ledger:ledger /app/.next/standalone ./
 COPY --from=build --chown=ledger:ledger /app/.next/static ./.next/static
 COPY --from=build --chown=ledger:ledger /app/public ./public
 USER ledger
+RUN LEDGER_DATA_DIR=/tmp/ledger-image-check node maintenance.cjs migrate \
+ && LEDGER_DATA_DIR=/tmp/ledger-image-check node maintenance.cjs backup \
+ && LEDGER_DATA_DIR=/tmp/ledger-image-check node worker.cjs --once \
+ && LEDGER_DATA_DIR=/tmp/ledger-image-check node maintenance.cjs health \
+ && rm -rf /tmp/ledger-image-check
 EXPOSE 8000
 CMD ["node", "server.js"]

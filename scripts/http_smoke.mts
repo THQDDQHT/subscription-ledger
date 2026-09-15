@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { hashPassword } from '../src/server/auth';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const STANDALONE = path.join(ROOT, '.next', 'standalone', 'server.js');
+const STANDALONE = path.join(ROOT, '.next', 'standalone');
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`断言失败：${message}`);
@@ -90,10 +90,11 @@ class HttpClient {
   }
 }
 
-async function startServer(dataDir: string): Promise<{ proc: ChildProcess; port: number }> {
+async function startServer(appDir: string, dataDir: string): Promise<{ proc: ChildProcess; port: number }> {
   const port = await freePort();
-  const proc = spawn(process.execPath, [STANDALONE], {
-    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', LEDGER_DATA_DIR: dataDir },
+  const proc = spawn(process.execPath, [path.join(appDir, 'server.js')], {
+    cwd: appDir,
+    env: { ...process.env, NODE_PATH: '', PORT: String(port), HOSTNAME: '127.0.0.1', LEDGER_DATA_DIR: dataDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stderr?.on('data', (chunk) => process.stderr.write(chunk));
@@ -114,16 +115,18 @@ async function stopServer(proc: ChildProcess): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (!fs.existsSync(STANDALONE)) {
+  if (!fs.existsSync(path.join(STANDALONE, 'server.js'))) {
     throw new Error('未找到 .next/standalone/server.js，请先运行 pnpm build');
   }
   const checks: string[] = [];
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ledger-http-'));
   try {
+    const appDir = path.join(root, 'app');
+    fs.cpSync(STANDALONE, appDir, { recursive: true, verbatimSymlinks: true });
     const password = crypto.randomBytes(18).toString('base64url');
     fs.writeFileSync(path.join(root, 'password.hash'), hashPassword(password), { mode: 0o600 });
 
-    let { proc, port } = await startServer(root);
+    let { proc, port } = await startServer(appDir, root);
     const client = new HttpClient(`http://127.0.0.1:${port}`);
     try {
       assert((await client.request('/')).status === 200, '首页 200');
@@ -207,7 +210,7 @@ async function main(): Promise<void> {
       assert((await client.request('/api/summary')).status === 200, '统计 200');
 
       await stopServer(proc);
-      ({ proc, port } = await startServer(root));
+      ({ proc, port } = await startServer(appDir, root));
       // 复用旧 Cookie 与 CSRF：会话密钥持久化在数据目录，重启后会话与数据仍有效
       client.base = `http://127.0.0.1:${port}`;
       const items4 = (await client.request('/api/items')).data as Array<{ amount: string }>;
@@ -220,7 +223,7 @@ async function main(): Promise<void> {
       {
       // 独立 Agent 客户端、worker 和网页共享真实 SQLite，不使用 Hermes 或真实 Telegram。
       const agent = (await client.request('/api/tokens', 'POST', { name: '隔离验收', scope: 'write' }, token)).data;
-      const childEnv = { ...process.env, LEDGER_BASE_URL: client.base, LEDGER_API_TOKEN: agent.token, LEDGER_DATA_DIR: root };
+      const childEnv = { ...process.env, NODE_PATH: '', LEDGER_BASE_URL: client.base, LEDGER_API_TOKEN: agent.token, LEDGER_DATA_DIR: root };
       const execute = promisify(execFile);
       const skill = async (args: string[]) => {
         const result = await execute('python3', [path.join(ROOT, 'skills/subscription-ledger/scripts/ledger.py'), ...args], { env: childEnv });
@@ -236,7 +239,7 @@ async function main(): Promise<void> {
       const conn = new Database(path.join(root, 'ledger.sqlite3'));
       const old = JSON.parse((conn.prepare('SELECT payload FROM subscriptions WHERE id=?').get(created.id) as { payload: string }).payload);
       conn.prepare('UPDATE subscriptions SET payload=? WHERE id=?').run(JSON.stringify({ ...old, status: 'active' }), created.id); conn.close();
-      await Promise.all([1, 2].map(() => execute(process.execPath, [path.join(ROOT, '.next/standalone/worker.cjs'), '--once'], { env: childEnv })));
+      await Promise.all([1, 2].map(() => execute(process.execPath, [path.join(appDir, 'worker.cjs'), '--once'], { env: childEnv, cwd: appDir })));
       assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 4500, '两个真实 worker 不重复扣减');
       assert((await skill(['GET', `/items/${created.id}/balance-entries`])).length === 2, '只有期初和一次消费');
       checks.push('Skill 真实 HTTP 调用、请求重试及并发 worker 扣减去重');
@@ -249,7 +252,7 @@ async function main(): Promise<void> {
       assert((await client.request('/api/restore', 'POST', { confirm: true, backup: balanceBackup }, token)).status === 200, 'v2 HTTP 恢复');
       assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 14500, '恢复后令牌和余额均有效');
       checks.push('Skill 充值去重、v2 备份恢复和令牌持久化');
-      const maintenance = path.join(ROOT, '.next/standalone/maintenance.cjs');
+      const maintenance = path.join(appDir, 'maintenance.cjs');
       const snapshot = await execute(process.execPath, [maintenance, 'backup'], { env: childEnv });
       assert(fs.existsSync(path.join(root, 'backups', snapshot.stdout.trim())), '迁移前备份文件');
       await execute(process.execPath, [maintenance, 'migrate'], { env: childEnv });
