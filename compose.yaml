@@ -7,6 +7,10 @@ services:
     environment:
       LEDGER_DATA_DIR: /data
       LEDGER_COOKIE_SECURE: "${LEDGER_COOKIE_SECURE:-0}"
+      NODE_USE_ENV_PROXY: "1"
+      HTTP_PROXY: "${LEDGER_PROXY_URL:-}"
+      HTTPS_PROXY: "${LEDGER_PROXY_URL:-}"
+      NO_PROXY: "${LEDGER_NO_PROXY:-localhost,127.0.0.1,::1,ledger,worker}"
     volumes:
       - ledger-data:/data
     restart: unless-stopped
@@ -27,6 +31,10 @@ services:
     command: ["node", "worker.cjs"]
     environment:
       LEDGER_DATA_DIR: /data
+      NODE_USE_ENV_PROXY: "1"
+      HTTP_PROXY: "${LEDGER_PROXY_URL:-}"
+      HTTPS_PROXY: "${LEDGER_PROXY_URL:-}"
+      NO_PROXY: "${LEDGER_NO_PROXY:-localhost,127.0.0.1,::1,ledger,worker}"
     volumes:
       - ledger-data:/data
     restart: unless-stopped

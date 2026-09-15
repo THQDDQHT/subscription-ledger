@@ -97,6 +97,14 @@ Compose 使用同一镜像启动 `ledger` 和 `worker`，共用 `ledger-data:/da
 
 CI 测试通过后发布多架构镜像到 `ghcr.io/thqddqht/subscription-ledger`。`LEDGER_IMAGE` 可指定版本镜像或 digest，默认 `:main`。本机手工构建用 `docker build -t subscription-ledger:local .`，再用 `LEDGER_IMAGE=subscription-ledger:local docker compose up -d`。
 
+### Telegram 出站代理
+
+服务器需要代理访问 Telegram 时，在服务器项目 `.env` 设置 `LEDGER_PROXY_URL=http://容器可访问的代理地址:端口`。Compose 会为网页和 worker 同时传入 `HTTP_PROXY`、`HTTPS_PROXY` 并启用 `NODE_USE_ENV_PROXY=1`；未配置代理 URL 时仍直接连接。Node 的原生 `fetch` 需显式启用环境代理，不能仅依赖 Docker daemon 拉取镜像时的代理设置，参见 [Node 代理配置](https://nodejs.org/download/release/latest-v24.x/docs/api/http.html#built-in-proxy-support)。
+
+容器中的 `127.0.0.1` 是容器自身，不能填写宿主机的回环代理地址。应使用代理实际监听的宿主机内网地址，并在防火墙中允许账本 Docker 网络访问该地址和端口。默认 `NO_PROXY` 包含 `localhost,127.0.0.1,::1,ledger,worker`，可通过 `LEDGER_NO_PROXY` 覆盖。
+
+修改后执行 `docker compose config --quiet` 和 `docker compose up -d --no-deps ledger worker`。仅修改运行配置时可以继续使用已固定 digest 的镜像，无需迁移数据库。验证两个容器都能访问 `https://api.telegram.org`，再在设置页读取私聊；后台通知还需要开启 Telegram 通知开关。
+
 首次设置密码：`docker compose run --rm ledger node init-password.cjs`。已有数据升级不重新初始化密码。生产升级计划见 [部署说明](docs/deployment-prepaid.md)，迁移和服务重启需按实际授权执行。
 
 ## 验证
