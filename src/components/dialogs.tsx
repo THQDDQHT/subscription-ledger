@@ -6,6 +6,7 @@ import { useLedger, type ConfirmOptions } from './ledger-context';
 import { cycleLabel, friendlyDate, money } from '@/lib/format';
 import { api } from '@/lib/api';
 import type { Subscription } from '@/lib/types';
+import { SelectField } from './SelectField';
 
 export function useModalDialog(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -111,6 +112,7 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
     setCycle(editing?.cycle ?? 'monthly');
     setKind(editing?.kind ?? 'subscription');
     setExtraOpen(Boolean(editing && (editing.notes || editing.url || editing.end_date)));
+    ref.current?.querySelector<HTMLInputElement>('input[name="name"]')?.focus({ preventScroll: true });
   }, [open, editing]);
 
   const updatePreview = (form: HTMLFormElement) => {
@@ -194,10 +196,18 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
           <div className="dialog-body">
             <label>
               记录类型
-              <select value={kind} disabled={Boolean(editing)} onChange={e => { setKind(e.target.value); const input = e.target.form?.elements.namedItem("next_date") as HTMLInputElement | null; if (e.target.value === "prepaid" && input && input.value <= today) { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); input.value = d.toISOString().slice(0, 10); } }}>
-                <option value="subscription">订阅（按期续费）</option>
-                <option value="prepaid">余额账户（话费、水电等）</option>
-              </select>
+              <SelectField label="记录类型" value={kind} disabled={Boolean(editing)} options={[
+                { value: 'subscription', label: '订阅', description: '按期续费，如会员、软件订阅' },
+                { value: 'prepaid', label: '余额账户', description: '先充值再扣减，如话费、水电' },
+              ]} onValueChange={value => {
+                setKind(value);
+                const input = ref.current?.querySelector<HTMLInputElement>('[name="next_date"]');
+                if (value === 'prepaid' && input && input.value <= today) {
+                  const date = new Date(today + 'T00:00:00Z');
+                  date.setUTCDate(date.getUTCDate() + 1);
+                  input.value = date.toISOString().slice(0, 10);
+                }
+              }} />
             </label>
             <label>
               {kind === 'prepaid' ? '账户名称' : '订阅名称'}
@@ -210,22 +220,24 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
               </label>
               <label>
                 计费周期
-                <select name="cycle" value={cycle} onChange={(e) => setCycle(e.target.value)}>
-                  <option value="monthly">月付</option>
-                  <option value="quarterly">季付（每 3 个日历月）</option>
-                  <option value="semiannual">半年付（每 6 个日历月）</option>
-                  <option value="yearly">年付</option>
-                  <option value="days">自定义天数</option>
-                  <option value="months">自定义月数</option>
-                  <option value="years">自定义年数</option>
-                </select>
+                <SelectField name="cycle" label="计费周期" value={cycle} onValueChange={setCycle} options={[
+                  { value: 'monthly', label: '月付' },
+                  { value: 'quarterly', label: '季付', description: '每 3 个日历月' },
+                  { value: 'semiannual', label: '半年付', description: '每 6 个日历月' },
+                  { value: 'yearly', label: '年付' },
+                  { value: 'days', label: '自定义天数' },
+                  { value: 'months', label: '自定义月数' },
+                  { value: 'years', label: '自定义年数' },
+                ]} />
               </label>
             </div>
+            <p className="field-note">金额填写所选周期的总费用，例如年付填写全年金额。</p>
             {kind === 'prepaid' && (
               <>
-                <label>费用类型<select name="cost_type" defaultValue={editing?.cost_type ?? 'fixed'}>
-                  <option value="fixed">固定费用</option><option value="estimated">估算费用（可补录实际账单）</option>
-                </select></label>
+                <label>费用类型<SelectField name="cost_type" label="费用类型" defaultValue={editing?.cost_type ?? 'fixed'} options={[
+                  { value: 'fixed', label: '固定费用' },
+                  { value: 'estimated', label: '估算费用', description: '之后可补录实际账单' },
+                ]} /></label>
                 {!editing && <div className="columns">
                   <label>当前余额（元）<input name="balance" required inputMode="decimal" pattern="-?(0|[1-9][0-9]{0,7})(\.[0-9]{1,2})?" placeholder="例如 120.00" /></label>
                   <label>余额核对日期<input name="balance_as_of" required type="date" min="1900-01-01" max={today} defaultValue={today} /></label>
@@ -258,12 +270,12 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
             </label>}
             <label>
               状态
-              <select name="status" defaultValue={editing?.status ?? 'active'}>
-                <option value="active">使用中</option>
-                <option value="cancelling">准备取消</option>
-                <option value="cancelled">{kind === 'prepaid' ? '暂停自动扣减' : '已取消续费'}</option>
-                <option value="ended">已结束</option>
-              </select>
+              <SelectField name="status" label="状态" defaultValue={editing?.status ?? 'active'} options={[
+                { value: 'active', label: '使用中' },
+                { value: 'cancelling', label: '准备取消' },
+                { value: 'cancelled', label: kind === 'prepaid' ? '暂停自动扣减' : '已取消续费' },
+                { value: 'ended', label: '已结束' },
+              ]} />
             </label>
             <details
               id="extra-fields"

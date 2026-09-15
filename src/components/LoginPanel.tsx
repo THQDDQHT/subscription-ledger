@@ -15,7 +15,7 @@ export default function LoginPanel() {
         <b>订阅账本</b>
       </div>
       <h2>登录私人账本</h2>
-      <p className="muted">数据保存在服务端，不会上传到第三方。</p>
+      <p className="muted">把订阅与日常账单，整理得井井有条。</p>
       <form
         id="login-form"
         onSubmit={(e) => {
@@ -34,9 +34,10 @@ export default function LoginPanel() {
           <input name="password" type="password" autoComplete="current-password" required maxLength={1024} />
         </label>
         <button type="submit" disabled={busy}>
-          {busy ? '保存中…' : '登录'}
+          {busy ? '登录中…' : '进入我的账本'}
         </button>
       </form>
+      <p className="login-note">你的私人工作空间 · 数据保存在服务端</p>
     </section>
   );
 }

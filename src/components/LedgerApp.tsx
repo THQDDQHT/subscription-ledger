@@ -326,7 +326,7 @@ export default function LedgerApp() {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || !authed) return;
       const target = e.target as HTMLElement;
-      const typing = Boolean(target.closest('input,textarea,select,[contenteditable]'));
+      const typing = Boolean(target.closest('input,textarea,select,[contenteditable],[role="combobox"],[role="listbox"]'));
       const modalOpen =
         editorOpen || renewOpen || confirmOpen || (detailRef.current?.dataset.modal === 'true' && detailRef.current.open);
       if (e.key === 'Escape') {

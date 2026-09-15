@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarClock, Contrast, List, LogOut, Moon, PanelLeft, Shield, Sun, X, Plus, Search, Pencil, Check, ExternalLink, Trash2, Download, Upload, ChevronRight, ListFilter, Undo2 } from 'lucide-react';
+import { CalendarClock, Contrast, List, LogOut, Moon, PanelLeft, Shield, Sun, X, Plus, Search, Pencil, Check, ExternalLink, Trash2, Download, Upload, ChevronRight, ListFilter, Undo2, Settings2, LockKeyhole } from 'lucide-react';
 import { useLedger } from './ledger-context';
 import { applyTheme, currentTheme, type ThemeMode } from '@/lib/theme';
 import { useState } from 'react';
@@ -48,7 +48,7 @@ export function ThemePicker({ mobile = false }: { mobile?: boolean }) {
 const NAV: Array<{ view: ViewKey; label: string; Icon: typeof List }> = [
   { view: 'recent', label: '近期处理', Icon: CalendarClock },
   { view: 'all', label: '全部订阅', Icon: List },
-  { view: 'backup', label: '备份与设置', Icon: Shield },
+  { view: 'backup', label: '备份与设置', Icon: Settings2 },
 ];
 
 export function Sidebar({ recentCount }: { recentCount: number }) {
@@ -59,12 +59,13 @@ export function Sidebar({ recentCount }: { recentCount: number }) {
         <BrandMark />
         <div className="brand-copy">
           <b>订阅账本</b>
-          <small>个人订阅工作台</small>
+          <small>Subscription Ledger</small>
         </div>
       </div>
+      <p className="nav-caption">工作空间</p>
       <nav aria-label="主导航">
         {NAV.map(({ view: v, label, Icon }) => (
-          <a key={v} href={`#${v}`} data-view={v} className="nav-item" aria-current={view === v ? 'page' : undefined} onClick={(e) => { e.preventDefault(); navigate(v); }}>
+          <a key={v} href={`#${v}`} data-view={v} className="nav-item" title={label} aria-current={view === v ? 'page' : undefined} onClick={(e) => { e.preventDefault(); navigate(v); }}>
             <Icon aria-hidden="true" />
             <span className="nav-text">{label}</span>
             {v === 'recent' && <span id="recent-count" className="count">{recentCount}</span>}
@@ -73,8 +74,12 @@ export function Sidebar({ recentCount }: { recentCount: number }) {
         ))}
       </nav>
       <div className="sidebar-bottom">
+        <div className="workspace-account">
+          <span className="account-icon"><LockKeyhole aria-hidden="true" /></span>
+          <div><b>私人账本</b><small>记录每一份长期投入</small></div>
+        </div>
         <ThemePicker />
-        <button id="logout" className="nav-item" onClick={() => void logout()}>
+        <button id="logout" className="nav-item" title="退出登录" onClick={() => void logout()}>
           <LogOut aria-hidden="true" />
           <span className="nav-text">退出登录</span>
         </button>
@@ -85,29 +90,37 @@ export function Sidebar({ recentCount }: { recentCount: number }) {
 
 export function Topbar({ title, desc, navCollapsed, onToggleNav }: { title: string; desc: string; navCollapsed: boolean; onToggleNav: () => void }) {
   const { view, openEditor } = useLedger();
+  const PageIcon = { recent: CalendarClock, all: List, backup: Settings2 }[view];
   return (
     <header className="topbar">
-      <button
-        id="collapse-nav"
-        className="icon-btn"
-        aria-label={navCollapsed ? '展开导航' : '收起导航'}
-        aria-expanded={!navCollapsed}
-        onClick={onToggleNav}
-      >
-        <PanelLeft aria-hidden="true" />
-      </button>
-      <span className="brand-mark topbar-mark" aria-hidden="true">
-        <CalendarClock />
-      </span>
-      <h1 id="page-title">{title}</h1>
-      <span id="page-desc" className="muted">{desc}</span>
-      <span className="grow" />
-      {view !== 'backup' && (
-        <button id="add" title="快捷键 N" onClick={() => openEditor(null)}>
-          <Plus aria-hidden="true" />
-          新增订阅
+      <div className="workspace-bar">
+        <button
+          id="collapse-nav"
+          className="icon-btn"
+          aria-label={navCollapsed ? '展开导航' : '收起导航'}
+          aria-expanded={!navCollapsed}
+          onClick={onToggleNav}
+        >
+          <PanelLeft aria-hidden="true" />
         </button>
-      )}
+        <span className="workspace-breadcrumb">私人账本 <ChevronRight aria-hidden="true" /> <span>{title}</span></span>
+        <span className="currency-label">人民币 CNY</span>
+      </div>
+      <div className="page-heading">
+        <div className="page-heading-copy">
+          <div className="page-heading-title">
+            <span className="page-heading-icon"><PageIcon aria-hidden="true" /></span>
+            <h1 id="page-title">{title}</h1>
+          </div>
+          <p id="page-desc" className="muted">{desc}</p>
+        </div>
+        {view !== 'backup' && (
+          <button id="add" title="快捷键 N" onClick={() => openEditor(null)}>
+            <Plus aria-hidden="true" />
+            新增订阅
+          </button>
+        )}
+      </div>
     </header>
   );
 }

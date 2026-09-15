@@ -71,7 +71,7 @@ describe('近期分组与筛选排序', () => {
 describe('页面回归（原 test_updated_page_and_favicon）', () => {
   test('编辑器包含季付选项，favicon 为本地 SVG', () => {
     const dialogs = readFileSync(path.resolve(__dirname, '../src/components/dialogs.tsx'), 'utf8');
-    expect(dialogs).toContain('value="quarterly"');
+    expect(dialogs).toContain("value: 'quarterly'");
     expect(dialogs).toContain('<details');
     const icon = readFileSync(path.resolve(__dirname, '../src/app/icon.svg'), 'utf8');
     expect(icon).toContain('<svg');

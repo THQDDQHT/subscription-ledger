@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronRight, Contrast, ListFilter, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronRight, Contrast, ListFilter, Plus, Search, X, Inbox, CircleAlert } from 'lucide-react';
 import { useLedger } from './ledger-context';
 import { DateText, MoneyText } from './bits';
 import { cents } from './BalancePanel';
 import { cycleLabel, relativeDay, money } from '@/lib/format';
 import { isActive, labels, recentGroup, selectGroups } from '@/lib/grouping';
 import type { Subscription } from '@/lib/types';
+import { SelectField } from './SelectField';
 
 function SkeletonRows({ count = 6 }: { count?: number }) {
   return (
@@ -89,7 +90,7 @@ function Row({ r }: { r: Subscription }) {
         </div>
       )}
       <div className="row-status">
-        {r.status !== 'active' && <span className={`chip chip--${r.status}`}>{labels[r.status]}</span>}
+        <span className={`chip chip--${r.status}`}>{labels[r.status]}</span>
         <div className="row-actions">
           {r.kind === 'prepaid' && active ? <button className="ghost compact" onClick={() => openBalance({ item: r, action: 'topup' })}>充值</button> : view === 'recent' && (group === 'overdue' || group === 'week') ? (
             <button
@@ -167,21 +168,21 @@ export default function SubscriptionList({ filtersOpen, onToggleFilters }: { fil
         <div className="toolbar-filters" id="toolbar-filters">
           <label className="filter-field">
             <span className="sr-only">筛选状态</span>
-            <select id="filter" value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="all">全部状态</option>
-              <option value="active">使用中</option>
-              <option value="cancelling">准备取消</option>
-              <option value="cancelled">已取消续费</option>
-              <option value="ended">已结束</option>
-            </select>
+            <SelectField id="filter" label="筛选状态" value={filter} onValueChange={setFilter} options={[
+              { value: 'all', label: '全部状态' },
+              { value: 'active', label: '使用中' },
+              { value: 'cancelling', label: '准备取消' },
+              { value: 'cancelled', label: '已取消续费' },
+              { value: 'ended', label: '已结束' },
+            ]} />
           </label>
           <label className="sort-field">
             <span className="sr-only">组内排序</span>
-            <select id="sort" value={sort} onChange={(e) => setSort(e.target.value as 'date' | 'name' | 'amount')}>
-              <option value="date">续费日期 ↑</option>
-              <option value="name">名称 A–Z</option>
-              <option value="amount">每期金额 ↓</option>
-            </select>
+            <SelectField id="sort" label="组内排序" value={sort} onValueChange={value => setSort(value as 'date' | 'name' | 'amount')} options={[
+              { value: 'date', label: '续费日期 ↑' },
+              { value: 'name', label: '名称 A–Z' },
+              { value: 'amount', label: '每期金额 ↓' },
+            ]} />
           </label>
         </div>
       </div>
@@ -202,6 +203,7 @@ export default function SubscriptionList({ filtersOpen, onToggleFilters }: { fil
             <SkeletonRows />
           ) : loadError ? (
             <div className="empty">
+              <span className="empty-icon"><CircleAlert aria-hidden="true" /></span>
               <b>无法加载账本</b>
               <span>{loadError}</span>
               <button type="button" className="ghost" onClick={() => load().catch(reportError)}>
@@ -210,6 +212,7 @@ export default function SubscriptionList({ filtersOpen, onToggleFilters }: { fil
             </div>
           ) : total === 0 ? (
             <div className="empty">
+              <span className="empty-icon">{searching ? <Search aria-hidden="true" /> : <Inbox aria-hidden="true" />}</span>
               <b>{items.length ? '这里暂时没有订阅' : '从第一份订阅开始'}</b>
               <span>
                 {searching ? '试试其他名称或备注关键词。' : view === 'recent' ? '当前没有 30 天内待处理的计划。' : '点击新增订阅，记录费用与下次续费日期。'}
