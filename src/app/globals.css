@@ -2290,3 +2290,18 @@
     margin-left:8px
   }
 }
+
+/* 余额与独立通知沿用表单、卡片和对话框的现有视觉规范。 */
+.balance-card { display: grid; gap: 10px; padding: 16px; margin: 16px 0; border: 1px solid var(--line); border-radius: 12px; }
+.balance-card > strong { font-size: 1.75rem; font-variant-numeric: tabular-nums; }
+.balance-card > small { color: var(--muted); }
+.integrations { margin-top: 32px; }
+.settings-form { display: grid; gap: 16px; margin: 20px 0; }
+.settings-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.token-list { padding: 0; list-style: none; }
+.token-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; overflow-wrap: anywhere; }
+.token-result { margin-top: 20px; }
+.settings-form input, .settings-form select, .token-result textarea { width: 100%; min-width: 0; }
+.settings-form input[type=checkbox] { width: auto; }
+#balance-dialog form { display: flex; flex-direction: column; max-height: inherit; }
+#balance-dialog .dialog-body { display: grid; gap: 18px; }

@@ -48,7 +48,7 @@ export function ThemePicker({ mobile = false }: { mobile?: boolean }) {
 const NAV: Array<{ view: ViewKey; label: string; Icon: typeof List }> = [
   { view: 'recent', label: '近期处理', Icon: CalendarClock },
   { view: 'all', label: '全部订阅', Icon: List },
-  { view: 'backup', label: '数据备份', Icon: Shield },
+  { view: 'backup', label: '备份与设置', Icon: Shield },
 ];
 
 export function Sidebar({ recentCount }: { recentCount: number }) {
@@ -119,7 +119,7 @@ export function MobileNav() {
       {NAV.map(({ view: v, label, Icon }) => (
         <a key={v} href={`#${v}`} data-view={v} aria-current={view === v ? 'page' : undefined} onClick={(e) => { e.preventDefault(); navigate(v); }}>
           <Icon aria-hidden="true" />
-          {label === '数据备份' ? '备份' : label}
+          {label === '备份与设置' ? '备份' : label}
         </a>
       ))}
     </nav>

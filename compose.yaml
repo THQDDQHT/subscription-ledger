@@ -1,7 +1,7 @@
 services:
   ledger:
     # 直接使用 CI 构建的镜像；本地构建则改回 build: .
-    image: ghcr.io/thqddqht/subscription-ledger:main
+    image: ${LEDGER_IMAGE:-ghcr.io/thqddqht/subscription-ledger:main}
     ports:
       - "127.0.0.1:${LEDGER_PORT:-8765}:8000"
     environment:
@@ -17,6 +17,29 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+  worker:
+    image: ${LEDGER_IMAGE:-ghcr.io/thqddqht/subscription-ledger:main}
+    command: ["node", "worker.cjs"]
+    environment:
+      LEDGER_DATA_DIR: /data
+    volumes:
+      - ledger-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "node", "maintenance.cjs", "health"]
+      interval: 60s
+      timeout: 20s
+      start_period: 30s
+      retries: 3
     logging:
       driver: json-file
       options:

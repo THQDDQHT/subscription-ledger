@@ -8,6 +8,11 @@ const AMOUNT_RE = /^(0|[1-9]\d{0,7})(\.\d{1,2})?$/;
 const MAX_CENTS = 99_999_999_99; // 八位整数 + 两位小数
 
 export interface SubscriptionRecord {
+  kind?: 'prepaid';
+  cost_type?: 'fixed' | 'estimated';
+  balance_cents?: number;
+  balance_as_of?: string;
+  low_balance_cents?: number;
   name: string;
   url: string;
   notes: string;
@@ -151,6 +156,22 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
     anchor_day: keep ? previous.anchor_day : Number(nextDate.slice(8, 10)),
     anchor_month: keep ? previous.anchor_month : Number(nextDate.slice(5, 7)),
   };
+  if (input.kind !== undefined && input.kind !== 'subscription' && input.kind !== 'prepaid') fail('记录类型不正确');
+  if (previous && (previous.kind === 'prepaid') !== (input.kind === 'prepaid')) fail('已有记录不能切换类型，请新建记录');
+  if (input.kind === 'prepaid') {
+    if (input.cost_type !== 'fixed' && input.cost_type !== 'estimated') fail('请选择固定费用或估算费用');
+    const asOf = previous?.balance_as_of ?? parseDate(input.balance_as_of);
+    if (!restoring && asOf > todayInShanghai()) fail('余额核对日期不能在未来');
+    if (nextDate <= asOf) fail('下次扣减日期须晚于余额核对日期');
+    record.kind = 'prepaid';
+    record.cost_type = input.cost_type;
+    record.balance_as_of = asOf;
+    record.balance_cents = previous?.balance_cents ?? (restoring ? parseBalanceCents(input.balance_cents) : parseBalance(input.balance));
+    record.low_balance_cents = input.low_balance === undefined
+      ? (previous?.low_balance_cents ?? (restoring ? parseCents(input.low_balance_cents) : 0))
+      : parseAmount(input.low_balance);
+    if (previous && input.balance !== undefined && parseBalance(input.balance) !== previous.balance_cents) fail('请使用充值或校正操作修改余额');
+  }
   if (restoring) {
     for (const [key, maximum] of [['anchor_day', 31], ['anchor_month', 12]] as const) {
       const value = input[key];
@@ -159,6 +180,16 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
     }
   }
   return record;
+}
+
+export function parseBalance(value: unknown): number {
+  if (typeof value !== 'string') fail('余额须为人民币数字，最多两位小数');
+  return value.startsWith('-') ? -parseAmount(value.slice(1)) : parseAmount(value);
+}
+
+export function parseBalanceCents(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || Math.abs(value) > MAX_CENTS) fail('余额超出允许范围');
+  return value;
 }
 
 /** 整数分 → 定点两位小数字符串，与 Python Decimal 口径一致。 */

@@ -23,10 +23,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = unknown>(url: string, method = 'GET', body?: unknown): Promise<T> {
+export async function api<T = unknown>(url: string, method = 'GET', body?: unknown, requestKey?: string): Promise<T> {
   const response = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, ...(requestKey ? { 'Idempotency-Key': requestKey } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await response.json();

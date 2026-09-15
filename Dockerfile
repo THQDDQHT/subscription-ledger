@@ -16,6 +16,7 @@ WORKDIR /app
 RUN adduser --uid 10001 --disabled-password ledger && mkdir /data && chown ledger:ledger /data
 COPY --from=build --chown=ledger:ledger /app/.next/standalone ./
 COPY --from=build --chown=ledger:ledger /app/.next/static ./.next/static
+COPY --from=build --chown=ledger:ledger /app/public ./public
 USER ledger
 EXPOSE 8000
 CMD ["node", "server.js"]

@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { Check, ChevronRight, Contrast, ListFilter, Plus, Search, X } from 'lucide-react';
 import { useLedger } from './ledger-context';
 import { DateText, MoneyText } from './bits';
-import { cycleLabel, relativeDay } from '@/lib/format';
+import { cents } from './BalancePanel';
+import { cycleLabel, relativeDay, money } from '@/lib/format';
 import { isActive, labels, recentGroup, selectGroups } from '@/lib/grouping';
 import type { Subscription } from '@/lib/types';
 
@@ -38,7 +39,7 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
 }
 
 function Row({ r }: { r: Subscription }) {
-  const { selectedId, view, today, showDetail, openRenew } = useLedger();
+  const { selectedId, view, today, showDetail, openRenew, openBalance } = useLedger();
   const active = isActive(r);
   const rel = relativeDay(r.next_date, today);
   const group = recentGroup(r, today);
@@ -66,7 +67,8 @@ function Row({ r }: { r: Subscription }) {
             <span className="service-name">{r.name}</span>
             {r.auto_renew && <Contrast className="auto-mark" role="img" aria-label="已开启自动续费" />}
           </span>
-          {!r.auto_renew && active && <small className="row-subline">手动续费</small>}
+          {r.kind === 'prepaid' && <small className="row-subline">余额 {money(cents(r.balance_cents ?? 0))} · {r.cost_type === 'estimated' ? '估算' : '固定'}</small>}
+          {r.kind !== 'prepaid' && !r.auto_renew && active && <small className="row-subline">手动续费</small>}
         </span>
       </button>
       <div className="row-amount">
@@ -89,7 +91,7 @@ function Row({ r }: { r: Subscription }) {
       <div className="row-status">
         {r.status !== 'active' && <span className={`chip chip--${r.status}`}>{labels[r.status]}</span>}
         <div className="row-actions">
-          {view === 'recent' && (group === 'overdue' || group === 'week') ? (
+          {r.kind === 'prepaid' && active ? <button className="ghost compact" onClick={() => openBalance({ item: r, action: 'topup' })}>充值</button> : view === 'recent' && (group === 'overdue' || group === 'week') ? (
             <button
               type="button"
               className="ghost compact"

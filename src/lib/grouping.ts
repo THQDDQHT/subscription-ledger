@@ -13,12 +13,16 @@ export function isActive(r: Subscription): boolean {
   return r.status === 'active' || r.status === 'cancelling';
 }
 
-export type RecentGroupKey = 'overdue' | 'week' | 'month';
+export type RecentGroupKey = 'low_balance' | 'pending' | 'overdue' | 'week' | 'month';
 
 /** 近期按订阅的当前计划分组；预测事件只用于统计，不生成重复操作。 */
 export function recentGroup(r: Subscription, today: string): RecentGroupKey | null {
   if (!isActive(r)) return null;
   const days = daysUntil(r.next_date, today);
+  if (r.kind === 'prepaid') {
+    if (days <= 0) return 'pending';
+    if (r.balance_cents! < Math.max(r.amount_cents, r.low_balance_cents ?? 0)) return 'low_balance';
+  }
   return days < 0 ? 'overdue' : days < 7 ? 'week' : days < 30 ? 'month' : null;
 }
 
@@ -59,7 +63,7 @@ export function selectGroups(items: Subscription[], sel: Selection): Group[] {
   });
   const definitions: Array<[string, string]> =
     sel.view === 'recent'
-      ? [['overdue', '逾期未确认'], ['week', '未来 7 天'], ['month', '之后至 30 天']]
+      ? [['low_balance', '余额不足，待充值'], ['pending', '待自动扣减'], ['overdue', '逾期未确认'], ['week', '未来 7 天'], ['month', '之后至 30 天']]
       : Object.entries(labels);
   return definitions
     .map(([key, title]) => ({

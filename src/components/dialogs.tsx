@@ -7,7 +7,7 @@ import { cycleLabel, friendlyDate, money } from '@/lib/format';
 import { api } from '@/lib/api';
 import type { Subscription } from '@/lib/types';
 
-function useModalDialog(open: boolean, onClose: () => void) {
+export function useModalDialog(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current;
@@ -98,6 +98,7 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
   const { ref, onBackdrop } = useModalDialog(open, onClose);
   const { busy, error, run } = useSubmitGuard();
   const [cycle, setCycle] = useState('monthly');
+  const [kind, setKind] = useState('subscription');
   const customCycle = cycle === 'days' || cycle === 'months' || cycle === 'years' ? cycle : null;
   const customLabel = cycle === 'months' ? '月数' : cycle === 'years' ? '年数' : '天数';
   const customMax = cycle === 'months' ? 1200 : cycle === 'years' ? 100 : 36500;
@@ -108,6 +109,7 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
   useEffect(() => {
     if (!open) return;
     setCycle(editing?.cycle ?? 'monthly');
+    setKind(editing?.kind ?? 'subscription');
     setExtraOpen(Boolean(editing && (editing.notes || editing.url || editing.end_date)));
   }, [open, editing]);
 
@@ -142,6 +144,16 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
       if (record.cycle === 'years') record.years = Number(f.get('years'));
       record.end_date = String(f.get('end_date') ?? '') || null;
       record.auto_renew = f.get('auto_renew') === 'on';
+      record.kind = kind;
+      if (kind === 'prepaid') {
+        record.auto_renew = false;
+        record.cost_type = String(f.get('cost_type'));
+        record.low_balance = String(f.get('low_balance') || '0');
+        if (!editing) {
+          record.balance = String(f.get('balance') ?? '');
+          record.balance_as_of = String(f.get('balance_as_of') ?? '');
+        }
+      }
       clearReport();
       if (editing) await api(`/api/items/${editing.id}`, 'PUT', record);
       else await api('/api/items', 'POST', record);
@@ -174,14 +186,21 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
           }}
         >
           <div className="dialog-head">
-            <h2 id="editor-title">{editing ? '编辑订阅' : '新增订阅'}</h2>
+            <h2 id="editor-title">{editing ? '编辑记录' : '新增记录'}</h2>
             <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
               <X aria-hidden="true" />
             </button>
           </div>
           <div className="dialog-body">
             <label>
-              订阅名称
+              记录类型
+              <select value={kind} disabled={Boolean(editing)} onChange={e => { setKind(e.target.value); const input = e.target.form?.elements.namedItem("next_date") as HTMLInputElement | null; if (e.target.value === "prepaid" && input && input.value <= today) { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); input.value = d.toISOString().slice(0, 10); } }}>
+                <option value="subscription">订阅（按期续费）</option>
+                <option value="prepaid">余额账户（话费、水电等）</option>
+              </select>
+            </label>
+            <label>
+              {kind === 'prepaid' ? '账户名称' : '订阅名称'}
               <input name="name" required maxLength={120} autoComplete="off" placeholder="例如 Netflix 高级会员" defaultValue={editing?.name ?? ''} />
             </label>
             <div className="columns">
@@ -202,6 +221,20 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
                 </select>
               </label>
             </div>
+            {kind === 'prepaid' && (
+              <>
+                <label>费用类型<select name="cost_type" defaultValue={editing?.cost_type ?? 'fixed'}>
+                  <option value="fixed">固定费用</option><option value="estimated">估算费用（可补录实际账单）</option>
+                </select></label>
+                {!editing && <div className="columns">
+                  <label>当前余额（元）<input name="balance" required inputMode="decimal" pattern="-?(0|[1-9][0-9]{0,7})(\.[0-9]{1,2})?" placeholder="例如 120.00" /></label>
+                  <label>余额核对日期<input name="balance_as_of" required type="date" min="1900-01-01" max={today} defaultValue={today} /></label>
+                </div>}
+                <label>余额提醒阈值（元）<input name="low_balance" inputMode="decimal" required pattern="(0|[1-9][0-9]{0,7})(\.[0-9]{1,2})?" defaultValue={((editing?.low_balance_cents ?? 0) / 100).toFixed(2)} /></label>
+                <p className="field-note">低于下一期费用或此阈值时提醒。账面余额按计划扣减，实际余额可随时校正。</p>
+                {editing && <p className="field-note">当前余额请通过详情中的“充值”或“校正余额”调整。</p>}
+              </>
+            )}
             {customCycle && (
               <div key={customCycle}>
                 <label>
@@ -215,20 +248,20 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
               </div>
             )}
             <label>
-              下次扣款 / 续费日期
+              {kind === 'prepaid' ? '下次自动扣减日期' : '下次扣款 / 续费日期'}
               <input name="next_date" type="date" min="1900-01-01" max="2100-12-31" required defaultValue={editing?.next_date ?? today} />
             </label>
             <p className="field-note">修改日期或周期后，后续续费将按新计划计算。</p>
-            <label className="check">
+            {kind !== 'prepaid' && <label className="check">
               <input name="auto_renew" type="checkbox" defaultChecked={editing?.auto_renew ?? false} />
               已在订阅平台开启自动续费（仅记录）
-            </label>
+            </label>}
             <label>
               状态
               <select name="status" defaultValue={editing?.status ?? 'active'}>
                 <option value="active">使用中</option>
                 <option value="cancelling">准备取消</option>
-                <option value="cancelled">已取消续费</option>
+                <option value="cancelled">{kind === 'prepaid' ? '暂停自动扣减' : '已取消续费'}</option>
                 <option value="ended">已结束</option>
               </select>
             </label>

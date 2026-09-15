@@ -8,6 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { db, dataRoot } from './db';
+import { rows, getRow, command, HttpError, entries, type Source } from './ledger';
+import { authenticateAgent, createToken, listTokens } from './agent-auth';
+import { reminders, notificationStatus, saveSettings, sendTelegram, telegramChats } from './notifications';
+import { openapi } from './openapi';
+import { validateBalanceEntries } from './balance-backup';
 import {
   DomainError, validate, parseDate, parseAmount, parseCents, parseTimestamp,
   money, summary, domain, todayInShanghai, nowIsoInShanghai,
@@ -18,8 +23,9 @@ import {
   checkPassword, safeEqual, type SessionData,
 } from './auth';
 
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const ID_RE = /^[a-f0-9]{32}$/;
+let restoringDatabase = false;
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}, cookies: string[] = []): Response {
   const h = new Headers(headers);
@@ -45,23 +51,14 @@ interface Ctx {
   session: SessionData;
   params: Record<string, string>;
   body: unknown;
+  source?: Source;
+  principal?: string;
 }
 
 // ---------- 数据访问（对应 app.py 的 rows/get_row/history_view） ----------
 
 interface SubscriptionRow extends SubscriptionRecord {
   id: string;
-}
-
-function rows(): SubscriptionRow[] {
-  return (db().prepare('SELECT * FROM subscriptions').all() as Array<{ id: string; payload: string }>).map(
-    (r) => ({ ...JSON.parse(r.payload), id: r.id }),
-  );
-}
-
-function getRow(ident: string): SubscriptionRow | null {
-  const r = db().prepare('SELECT payload FROM subscriptions WHERE id = ?').get(ident) as { payload: string } | undefined;
-  return r ? { ...JSON.parse(r.payload), id: ident } : null;
 }
 
 interface RenewalRow {
@@ -145,57 +142,26 @@ function stats(): Response {
   return json(summary(rows(), todayInShanghai()));
 }
 
-function addItem(ctx: Ctx): Response {
-  const r = validate(ctx.body);
-  const ident = newId();
-  const conn = db();
-  conn.exec('BEGIN IMMEDIATE');
-  try {
-    conn.prepare('INSERT INTO subscriptions VALUES (?,?)').run(ident, JSON.stringify(r));
-    conn.exec('COMMIT');
-  } catch (error) {
-    conn.exec('ROLLBACK');
-    throw error;
-  }
-  return json({ ...r, id: ident }, 201);
+function itemCommand(ctx: Ctx, action: string): Response {
+  const result = command(action, ctx.params.id ?? '', ctx.body as Record<string, unknown>, {
+    source: ctx.source ?? 'web', principal: ctx.principal,
+    key: ctx.req.headers.get('Idempotency-Key') ?? undefined,
+  });
+  return json(result.data, result.status ?? 200);
 }
 
-function changeItem(ctx: Ctx): Response {
-  const ident = ctx.params.id;
-  const conn = db();
-  conn.exec('BEGIN IMMEDIATE');
-  try {
-    const old = getRow(ident);
-    if (old === null) {
-      conn.exec('ROLLBACK');
-      return json({ error: '记录不存在' }, 404);
-    }
-    if (ctx.req.method === 'DELETE') {
-      if ((ctx.body as Record<string, unknown>).confirm !== true) throw new DomainError('删除需要明确确认');
-      conn.prepare('DELETE FROM subscriptions WHERE id = ?').run(ident);
-      conn.prepare('DELETE FROM renewals WHERE subscription_id = ?').run(ident);
-    } else {
-      const r = validate(ctx.body, old);
-      conn.prepare('UPDATE subscriptions SET payload = ? WHERE id = ?').run(JSON.stringify(r), ident);
-    }
-    conn.exec('COMMIT');
-  } catch (error) {
-    try { conn.exec('ROLLBACK'); } catch { /* 已回滚 */ }
-    throw error;
-  }
-  return json({ ok: true });
-}
+function addItem(ctx: Ctx): Response { return itemCommand(ctx, 'create'); }
+function changeItem(ctx: Ctx): Response { return itemCommand(ctx, ctx.req.method === 'DELETE' ? 'delete' : 'edit'); }
 
 function renew(ctx: Ctx): Response {
   const ident = ctx.params.id;
   const conn = db();
-  conn.exec('BEGIN IMMEDIATE');
-  try {
+  const result = command('renew', ident, ctx.body as Record<string, unknown>, { source: ctx.source ?? 'web', principal: ctx.principal, key: ctx.req.headers.get('Idempotency-Key') ?? undefined }, () => {
     const r = getRow(ident);
     if (!r) {
-      conn.exec('ROLLBACK');
-      return json({ error: '记录不存在' }, 404);
+      throw new HttpError(404, '记录不存在');
     }
+    if (r.kind === 'prepaid') throw new DomainError('余额账户会按计划自动扣减，请使用充值或校正操作');
     const data = ctx.body as Record<string, unknown>;
     if (data.confirm !== true) throw new DomainError('续费需要明确确认');
     if (r.status !== 'active' && r.status !== 'cancelling') {
@@ -216,12 +182,9 @@ function renew(ctx: Ctx): Response {
     const { id: _omit, ...rest } = r;
     const updated = { ...rest, next_date: nxt };
     conn.prepare('UPDATE subscriptions SET payload = ? WHERE id = ?').run(JSON.stringify(updated), ident);
-    conn.exec('COMMIT');
-    return json({ ok: true, renewal_id: rid });
-  } catch (error) {
-    try { conn.exec('ROLLBACK'); } catch { /* 已回滚 */ }
-    throw error;
-  }
+    return { data: { ok: true, renewal_id: rid } };
+  });
+  return json(result.data, result.status ?? 200);
 }
 
 function listRenewals(ctx: Ctx): Response {
@@ -233,19 +196,16 @@ function listRenewals(ctx: Ctx): Response {
 function undoRenewal(ctx: Ctx): Response {
   const { id: ident, rid } = ctx.params;
   const conn = db();
-  conn.exec('BEGIN IMMEDIATE');
-  try {
+  const result = command('undoRenewal', ident, { ...(ctx.body as Record<string, unknown>), ...(ctx.params.rid ? { renewal_id: ctx.params.rid } : {}) }, { source: ctx.source ?? 'web', principal: ctx.principal, key: ctx.req.headers.get('Idempotency-Key') ?? undefined }, () => {
     const r = getRow(ident);
     if (!r) {
-      conn.exec('ROLLBACK');
-      return json({ error: '记录不存在' }, 404);
+      throw new HttpError(404, '记录不存在');
     }
     if ((ctx.body as Record<string, unknown>).confirm !== true) throw new DomainError('撤销续费需要明确确认');
     const history = historyView(r);
     const target = history.find((h) => h.id === rid);
     if (!target) {
-      conn.exec('ROLLBACK');
-      return json({ error: '续费记录不存在' }, 404);
+      throw new HttpError(404, '续费记录不存在');
     }
     if (history[0].id !== rid) throw new DomainError('只能撤销最近一次续费');
     if (!target.undoable) throw new DomainError('续费后计划日期已被修改，无法撤销；如需调整请直接编辑日期');
@@ -253,20 +213,23 @@ function undoRenewal(ctx: Ctx): Response {
     conn.prepare('DELETE FROM renewals WHERE id = ?').run(rid);
     const { id: _omit, ...rest } = r;
     conn.prepare('UPDATE subscriptions SET payload = ? WHERE id = ?').run(JSON.stringify({ ...rest, next_date: target.previous_date }), ident);
-    conn.exec('COMMIT');
-    return json({ ok: true, next_date: target.previous_date });
-  } catch (error) {
-    try { conn.exec('ROLLBACK'); } catch { /* 已回滚 */ }
-    throw error;
-  }
+    return { data: { ok: true, next_date: target.previous_date } };
+  });
+  return json(result.data, result.status ?? 200);
 }
 
 function exportData(): Response {
+  return db().transaction(exportSnapshot)();
+}
+
+function exportSnapshot(): Response {
   // 续费历史按写入顺序导出，恢复时按列表顺序写回，早期无时间戳的记录仍保持先后关系。
   const items = rows().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const renewals = (db().prepare('SELECT * FROM renewals ORDER BY rowid').all() as RenewalRow[]).map(withAmount);
+  const balances = entries();
+  const version = items.some(r => r.kind === 'prepaid') ? 2 : 1;
   return json(
-    { format: 'subscription-ledger', version: 1, currency: 'CNY', items, renewals },
+    { format: 'subscription-ledger', version, currency: 'CNY', items, renewals, ...(version === 2 ? { balance_entries: balances } : {}) },
     200,
     { 'Content-Disposition': 'attachment; filename="subscription-ledger.json"' },
   );
@@ -278,7 +241,7 @@ async function restore(ctx: Ctx): Promise<Response> {
   const backup = data.backup as Record<string, unknown> | null;
   if (
     typeof backup !== 'object' || backup === null || Array.isArray(backup) ||
-    backup.format !== 'subscription-ledger' || typeof backup.version !== 'number' || backup.version !== 1 || backup.currency !== 'CNY'
+    backup.format !== 'subscription-ledger' || ![1, 2].includes(backup.version as number) || backup.currency !== 'CNY'
   ) {
     throw new DomainError('备份格式/版本不支持（仅人民币）');
   }
@@ -293,13 +256,17 @@ async function restore(ctx: Ctx): Promise<Response> {
   };
   const prepared: Array<[string, string]> = [];
   const ids = new Set<string>();
+  const itemMap = new Map<string, SubscriptionRecord>();
   for (const r of items) {
     const clean = validate(r, undefined, true);
     const ident = identifier((r as Record<string, unknown>).id);
+    if (backup.version === 1 && clean.kind === 'prepaid') throw new DomainError('余额账户需要 v2 备份与完整流水');
     if (ids.has(ident)) throw new DomainError('备份存在重复记录');
     ids.add(ident);
+    itemMap.set(ident, clean);
     prepared.push([ident, JSON.stringify(clean)]);
   }
+  const balanceEntries = validateBalanceEntries(backup.version === 2 ? backup.balance_entries : [], itemMap);
   const preparedHistory: Array<[string, string, string, string, string, number | null, string | null]> = [];
   const historyIds = new Set<string>();
   for (const h of history) {
@@ -308,6 +275,7 @@ async function restore(ctx: Ctx): Promise<Response> {
     const ident = identifier(row.id);
     const sub = identifier(row.subscription_id);
     if (historyIds.has(ident) || !ids.has(sub)) throw new DomainError('续费历史引用/ID 无效');
+    if (itemMap.get(sub)?.kind === 'prepaid') throw new DomainError('余额账户不能包含订阅续费历史');
     const actual = parseDate(row.actual_date);
     const prev = parseDate(row.previous_date);
     const nxt = parseDate(row.next_date);
@@ -320,13 +288,14 @@ async function restore(ctx: Ctx): Promise<Response> {
   }
   // 先拿写锁再备份同一个已提交快照，随后在同一事务内覆盖。
   const conn = db();
-  conn.exec('BEGIN IMMEDIATE');
   const root = dataRoot();
   const backupsDir = path.join(root, 'backups');
-  fs.mkdirSync(/* turbopackIgnore: true */ backupsDir, { recursive: true, mode: 0o700 });
   const stamp = nowIsoInShanghai().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
   const target = path.join(backupsDir, `${stamp}-${crypto.randomBytes(6).toString('hex')}.sqlite3`);
+  restoringDatabase = true;
   try {
+    conn.exec('BEGIN IMMEDIATE');
+    fs.mkdirSync(/* turbopackIgnore: true */ backupsDir, { recursive: true, mode: 0o700 });
     const fd = fs.openSync(/* turbopackIgnore: true */ target, 'wx', 0o600);
     fs.closeSync(fd);
     // better-sqlite3 的 backup 不能跑在持有写事务的同一连接上；另开只读连接，
@@ -338,6 +307,8 @@ async function restore(ctx: Ctx): Promise<Response> {
       reader.close();
     }
     conn.prepare('DELETE FROM renewals').run();
+    conn.prepare('DELETE FROM balance_entries').run();
+    conn.prepare('DELETE FROM notifications').run();
     conn.prepare('DELETE FROM subscriptions').run();
     const insertItem = conn.prepare('INSERT INTO subscriptions VALUES (?,?)');
     for (const [ident, payloadText] of prepared) insertItem.run(ident, payloadText);
@@ -345,10 +316,14 @@ async function restore(ctx: Ctx): Promise<Response> {
       'INSERT INTO renewals (id,subscription_id,actual_date,previous_date,next_date,amount_cents,recorded_at) VALUES (?,?,?,?,?,?,?)',
     );
     for (const entry of preparedHistory) insertHistory.run(...entry);
+    const insertBalance = conn.prepare('INSERT INTO balance_entries(id,subscription_id,kind,period_date,payload) VALUES (?,?,?,?,?)');
+    for (const e of balanceEntries) insertBalance.run(e.id, e.subscription_id, e.kind, e.period_date, JSON.stringify(e));
     conn.exec('COMMIT');
   } catch (error) {
     try { conn.exec('ROLLBACK'); } catch { /* 已回滚 */ }
     throw error;
+  } finally {
+    restoringDatabase = false;
   }
   return json({ ok: true, backup_file: path.basename(target) });
 }
@@ -370,12 +345,41 @@ function route(method: string, pathPattern: string, handler: Handler): void {
   ROUTES.push({ method, pattern: new RegExp(`^${pattern}$`), keys, handler });
 }
 
+route('GET', '/api/openapi.json', () => json(openapi));
 route('GET', '/api/session', sessionInfo);
 route('POST', '/api/login', login);
 route('POST', '/api/logout', logout);
 route('GET', '/api/items', listItems);
+route('GET', '/api/items/<id>', ctx => {
+  const r = getRow(ctx.params.id);
+  return r ? json({ ...r, suggested_next: domain.advance(r) }) : json({ error: '记录不存在' }, 404);
+});
 route('GET', '/api/summary', stats);
 route('POST', '/api/items', addItem);
+route('GET', '/api/items/<id>/balance-entries', ctx => getRow(ctx.params.id) ? json(entries(ctx.params.id)) : json({ error: '记录不存在' }, 404));
+for (const action of ['topup', 'reconcile', 'bill']) route('POST', `/api/items/<id>/${action}`, ctx => {
+  if (!ctx.req.headers.get('Idempotency-Key')) throw new DomainError('余额操作需要 Idempotency-Key 请求标识');
+  return itemCommand(ctx, action);
+});
+route('GET', '/api/reminders', () => json(db().transaction(() => reminders())()));
+route('GET', '/api/notifications', () => json(notificationStatus()));
+route('PUT', '/api/notifications', ctx => json(saveSettings(ctx.body as Record<string, unknown>)));
+route('POST', '/api/notifications/test', async ctx => {
+  if ((ctx.body as Record<string, unknown>).confirm !== true) throw new DomainError('发送测试通知需要确认');
+  try { await sendTelegram('订阅账本：独立 Telegram 通知测试成功。'); }
+  catch (error) { return json({ error: error instanceof Error ? error.message : '发送失败' }, 502); }
+  return json({ ok: true });
+});
+route('POST', '/api/notifications/chats', async ctx => {
+  try { return json(await telegramChats((ctx.body as Record<string, unknown>).token)); }
+  catch (error) { if (error instanceof DomainError) throw error; return json({ error: error instanceof Error ? error.message : '读取失败' }, 502); }
+});
+route('GET', '/api/tokens', () => json(listTokens()));
+route('POST', '/api/tokens', ctx => json(createToken(ctx.body as Record<string, unknown>), 201));
+route('DELETE', '/api/tokens/<id>', ctx => {
+  db().prepare('DELETE FROM agent_tokens WHERE id=?').run(ctx.params.id);
+  return json({ ok: true });
+});
 route('PUT', '/api/items/<id>', changeItem);
 route('DELETE', '/api/items/<id>', changeItem);
 route('POST', '/api/items/<id>/renew', renew);
@@ -403,15 +407,23 @@ class PayloadTooLarge extends Error {}
 
 export async function handleApi(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const pathname = url.pathname;
+  const isAgent = url.pathname.startsWith('/api/v1/');
+  const pathname = isAgent ? url.pathname.replace('/api/v1/', '/api/') : url.pathname;
   try {
-    const existing = readSessionFrom(req);
+    if (restoringDatabase) return json({ error: '正在恢复备份，请稍后重试' }, 503);
+    const agent = isAgent ? authenticateAgent(req) : null;
+    if (isAgent && !agent) return json({ error: 'Agent 访问令牌无效或已撤销' }, 401);
+    if (isAgent && !/^\/api\/(items(?:\/[a-f0-9]{32}(?:\/(?:renew|renewals|balance-entries|topup|reconcile|bill)(?:\/[a-f0-9]{32}\/undo)?)?)?|summary|reminders|openapi\.json)$/.test(pathname)) return json({ error: 'Agent 无权访问此接口' }, 403);
+    const needsBody = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+    if (isAgent && needsBody && agent?.scope !== 'write') return json({ error: '此令牌仅允许读取' }, 403);
+    if (isAgent && needsBody && !req.headers.get('Idempotency-Key')) return json({ error: '写操作需要 Idempotency-Key 请求标识' }, 400);
+    const existing = isAgent ? { authenticated: true, csrf: '', exp: 0 } : readSessionFrom(req);
     const fresh = existing === null;
     const session = existing ?? { authenticated: false, csrf: newCsrf(), exp: 0 };
     if (!PUBLIC_PATHS.has(pathname) && !session.authenticated) {
       return json({ error: '请先登录' }, 401);
     }
-    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+    if (needsBody && !isAgent) {
       const token = req.headers.get('x-csrf-token') ?? '';
       if (!safeEqual(token, session.csrf)) return json({ error: 'CSRF 校验失败，请刷新重试' }, 403);
     }
@@ -421,9 +433,8 @@ export async function handleApi(req: Request): Promise<Response> {
     match.r.keys.forEach((key, index) => {
       params[key] = decodeURIComponent((match.m as RegExpExecArray)[index + 1]);
     });
-    const needsBody = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
     const body = needsBody ? await readJsonBody(req) : {};
-    const response = await match.r.handler({ req, session, params, body });
+    const response = await match.r.handler({ req, session, params, body, source: isAgent ? 'agent' : 'web', principal: agent?.id });
     // 首次建立匿名会话：下发带 CSRF 的会话 Cookie（对应 Flask 的 session.setdefault）；
     // 登录/退出等已自带会话 Cookie 的响应除外。
     if (fresh && !response.headers.has('Set-Cookie')) {
@@ -433,8 +444,9 @@ export async function handleApi(req: Request): Promise<Response> {
     }
     return response;
   } catch (error) {
+    if (error instanceof HttpError) return json({ error: error.message }, error.status);
     if (error instanceof DomainError) return badRequest(error.message);
-    if (error instanceof PayloadTooLarge) return json({ error: '文件过大，限制 2 MiB' }, 413);
+    if (error instanceof PayloadTooLarge) return json({ error: '文件过大，限制 16 MiB' }, 413);
     console.error('API 内部错误', error);
     return json({ error: '服务器内部错误' }, 500);
   }

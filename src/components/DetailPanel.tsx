@@ -7,6 +7,7 @@ import { DateText, MoneyText } from './bits';
 import { cycleLabel, friendlyDate, historySummary, money, recordedAt, relativeDay } from '@/lib/format';
 import { isActive, labels } from '@/lib/grouping';
 import type { Renewal, Subscription } from '@/lib/types';
+import { BalanceHistory, cents } from './BalancePanel';
 import { api } from '@/lib/api';
 
 function RenewalHistory({ r }: { r: Subscription }) {
@@ -107,7 +108,7 @@ function RenewalHistory({ r }: { r: Subscription }) {
 }
 
 export default function DetailPanel({ selected }: { selected: Subscription | null }) {
-  const { today, closeDetail, openEditor, openRenew, confirm, load, reportOk, reportError, setFocusKey, detailError, detailRef } = useLedger();
+  const { today, closeDetail, openEditor, openRenew, openBalance, confirm, load, reportOk, reportError, setFocusKey, detailError, detailRef } = useLedger();
   const bodyRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef('');
 
@@ -122,7 +123,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
   const remove = async (r: Subscription) => {
     const ok = await confirm({
       title: `删除「${r.name}」？`,
-      body: '这条订阅及其全部续费历史将被删除，无法撤销。',
+      body: '这条记录及其全部续费历史、余额流水将被删除，无法撤销。',
       note: '如果只是停用，可改为「已取消续费」或「已结束」保留记录。',
       accept: '删除订阅',
     });
@@ -169,13 +170,18 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
               <p className="detail-amount">
                 <MoneyText value={selected.amount} />
               </p>
-              <p className="muted">{cycleLabel(selected)}</p>
+              <p className="muted">{cycleLabel(selected)}{selected.cost_type === 'estimated' ? ' · 估算费用' : ''}</p>
+              {selected.kind === 'prepaid' && <section className="balance-card" aria-label="账户余额">
+                <span>账面余额</span><strong className={(selected.balance_cents ?? 0) < Math.max(selected.amount_cents, selected.low_balance_cents ?? 0) ? 'error' : ''}>{money(cents(selected.balance_cents ?? 0))}</strong>
+                <small>最近核对 {selected.balance_as_of} · 提醒下限 {money(cents(Math.max(selected.amount_cents, selected.low_balance_cents ?? 0)))}</small>
+                <button className="ghost compact" onClick={() => openBalance({ item: selected, action: 'reconcile' })}>校正余额</button>
+              </section>}
               {isActive(selected) ? (
                 (() => {
                   const rel = relativeDay(selected.next_date, today);
                   return (
                     <div className={`detail-plan${rel.cls ? ` ${rel.cls}` : ''}`}>
-                      <span>当前待确认计划</span>
+                      <span>{selected.kind === 'prepaid' ? '下次自动记账' : '当前待确认计划'}</span>
                       <strong>{rel.text}</strong>
                       <span className="detail-plan-date">
                         {selected.next_date} · {friendlyDate(selected.next_date, today)}
@@ -191,8 +197,8 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                 </div>
               )}
               <dl className="detail-facts">
-                <dt>续费方式</dt>
-                <dd>{selected.auto_renew ? '自动续费已开' : '手动续费'}</dd>
+                <dt>{selected.kind === 'prepaid' ? '消费金额' : '续费方式'}</dt>
+                <dd>{selected.kind === 'prepaid' ? (selected.cost_type === 'estimated' ? '按估算自动扣减账面余额' : '按固定金额自动扣减账面余额') : selected.auto_renew ? '自动续费已开' : '手动续费'}</dd>
                 <dt>计入预算</dt>
                 <dd>{isActive(selected) ? '是' : '否'}</dd>
                 <dt>服务可用截止日</dt>
@@ -206,7 +212,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
               )}
               <h3>备注</h3>
               <p className="detail-notes">{selected.notes || '暂无备注'}</p>
-              <RenewalHistory r={selected} />
+              {selected.kind === 'prepaid' ? <BalanceHistory item={selected} /> : <RenewalHistory r={selected} />}
               <button type="button" className="quiet danger-text" onClick={() => void remove(selected).catch(reportError)}>
                 <Trash2 aria-hidden="true" />
                 删除订阅
@@ -221,7 +227,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                 <Pencil aria-hidden="true" />
                 编辑订阅
               </button>
-              {isActive(selected) && (
+              {selected.kind === 'prepaid' ? <button type="button" onClick={() => openBalance({ item: selected, action: 'topup' })}>记录充值</button> : isActive(selected) && (
                 <button type="button" onClick={() => openRenew(selected)}>
                   <Check aria-hidden="true" />
                   记录续费

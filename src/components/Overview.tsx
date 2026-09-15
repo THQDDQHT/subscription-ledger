@@ -7,12 +7,12 @@ import { MoneyText } from './bits';
 
 export default function Overview() {
   const { stats, items, today, loading } = useLedger();
-  const overdueCount = today ? items.filter((r) => isActive(r) && daysUntil(r.next_date, today) < 0).length : 0;
+  const overdueCount = today ? items.filter((r) => r.kind !== 'prepaid' && isActive(r) && daysUntil(r.next_date, today) < 0).length : 0;
   return (
     <section id="overview" className={`overview${loading ? ' is-loading' : ''}`} aria-label="统计">
       <div className="metrics">
         <article>
-          <span>未来 30 天预计续费</span>
+          <span>未来 30 天预计费用</span>
           <strong id="forecast">{stats ? <MoneyText value={stats.forecast_30} /> : '—'}</strong>
           <small>按计划估算，非已扣款</small>
         </article>
@@ -33,7 +33,7 @@ export default function Overview() {
         <p id="window-note">{today ? `今天 ${today} · ${friendlyDate(today, today)} · 中国标准时间` : ''}</p>
         <details className="calculation">
           <summary>统计口径</summary>
-          <p>使用中与准备取消计入预算。未来 30 天包含今天，不包含第 30 天；同一订阅可能有多次预计续费。近期处理仅显示每个订阅当前待确认的计划，分组小计为组内各订阅当前计划的每期金额之和。</p>
+          <p>使用中与准备取消计入预算。未来 30 天包含今天，不包含第 30 天，包含订阅续费和余额账户的预计消耗；充值与余额校正不重复计为消费。月度预算按计划折算。余额账户按期自动记账，实际扣费和余额以服务平台为准。</p>
         </details>
       </div>
     </section>

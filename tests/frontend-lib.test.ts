@@ -123,3 +123,16 @@ describe('格式化', () => {
     expect(recordedAt(null)).toBe('');
   });
 });
+
+
+test('余额不足在远期也展示，待自动扣减与订阅逾期分组分开', () => {
+  const records = [
+    row({ id: 'low', kind: 'prepaid', balance_cents: 100, amount_cents: 1000, next_date: '2026-12-01' }),
+    row({ id: 'pending', kind: 'prepaid', balance_cents: 5000, amount_cents: 1000, next_date: TODAY }),
+    row({ id: 'paused', kind: 'prepaid', balance_cents: -500, status: 'cancelled', next_date: TODAY }),
+    row({ id: 'old', next_date: '2026-09-11' }),
+  ];
+  expect(ids(selectGroups(records, { view: 'recent', filter: 'all', keyword: '', sort: 'date', today: TODAY }))).toEqual([
+    ['recent:low_balance', ['low']], ['recent:pending', ['pending']], ['recent:overdue', ['old']],
+  ]);
+});

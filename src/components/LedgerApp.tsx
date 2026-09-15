@@ -11,12 +11,13 @@ import Overview from './Overview';
 import SubscriptionList from './SubscriptionList';
 import DetailPanel from './DetailPanel';
 import { ConfirmDialog, EditorDialog, RenewDialog } from './dialogs';
+import { BalanceDialog, type BalanceAction } from './BalancePanel';
 import BackupView from './BackupView';
 
 const TITLES: Record<ViewKey, [string, string]> = {
   recent: ['近期处理', '先处理到期事项，再整理订阅'],
   all: ['全部订阅', '查找、比较与管理全部订阅'],
-  backup: ['数据备份', '备份你的账本，按需恢复'],
+  backup: ['备份与设置', '备份账本，配置通知与 Agent 接入'],
 };
 
 interface ConfirmState extends ConfirmOptions {
@@ -44,6 +45,7 @@ export default function LedgerApp() {
   const [wide, setWide] = useState(true);
   const [editing, setEditing] = useState<Subscription | null | undefined>(undefined);
   const [renewing, setRenewing] = useState<Subscription | null>(null);
+  const [balanceAction, setBalanceAction] = useState<BalanceAction | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   const detailRef = useRef<HTMLDialogElement>(null);
@@ -93,6 +95,7 @@ export default function LedgerApp() {
     setMessage(null);
     setEditing(undefined);
     setRenewing(null);
+    setBalanceAction(null);
     setConfirmState((current) => {
       current?.resolve(false);
       return null;
@@ -191,7 +194,7 @@ export default function LedgerApp() {
   // ---------- 详情弹窗形态：宽屏并排（非模态），窄屏模态 ----------
 
   const editorOpen = editing !== undefined;
-  const renewOpen = renewing !== null;
+  const renewOpen = renewing !== null || balanceAction !== null;
   const confirmOpen = confirmState !== null;
 
   useEffect(() => {
@@ -218,6 +221,14 @@ export default function LedgerApp() {
     else d.show();
   }, [selectedId, authed, editorOpen, renewOpen, confirmOpen, wide]);
 
+  useEffect(() => {
+    if (!authed || editorOpen || renewOpen || confirmOpen) return;
+    const refresh = () => { if (document.visibilityState === 'visible') void load().catch(reportError); };
+    const timer = setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [authed, editorOpen, renewOpen, confirmOpen, load, reportError]);
+
   // ---------- 动作 ----------
 
   const login = useCallback(
@@ -243,6 +254,7 @@ export default function LedgerApp() {
   }, [reportError]);
 
   const openEditor = useCallback((r: Subscription | null) => setEditing(r), []);
+  const openBalance = useCallback((state: BalanceAction) => setBalanceAction(state), []);
   const openRenew = useCallback((r: Subscription) => setRenewing(r), []);
 
   const confirm = useCallback((options: ConfirmOptions) => {
@@ -372,6 +384,7 @@ export default function LedgerApp() {
       closeDetail,
       openEditor,
       openRenew,
+      openBalance,
       confirm,
       setFilter,
       setSort,
@@ -386,7 +399,7 @@ export default function LedgerApp() {
     [
       booted, authed, configured, items, stats, today, view, selectedId, filter, sort, keyword,
       collapsed, searching, loading, loadError, message, detailError, wide,
-      login, logout, load, navigate, showDetail, closeDetail, openEditor, openRenew, confirm,
+      login, logout, load, navigate, showDetail, closeDetail, openEditor, openRenew, openBalance, confirm,
       setFilter, setSort, setKeyword, setGroupCollapsed, reportOk, reportError, clearReport, fetchHistory, setFocusKey,
     ],
   );
@@ -429,6 +442,7 @@ export default function LedgerApp() {
       {authed && (
         <>
           <EditorDialog editing={editing} onClose={() => setEditing(undefined)} />
+          <BalanceDialog state={balanceAction} onClose={() => setBalanceAction(null)} />
           <RenewDialog renewing={renewing} onClose={() => setRenewing(null)} />
           <ConfirmDialog state={confirmState} onDone={(v) => { confirmState?.resolve(v); setConfirmState(null); }} />
         </>

@@ -1,5 +1,6 @@
 'use client';
 
+import type { BalanceAction } from './BalancePanel';
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type { Renewal, SessionInfo, Subscription, Summary, ViewKey } from '@/lib/types';
@@ -45,6 +46,7 @@ export interface LedgerContextValue {
   showDetail: (r: Subscription) => void;
   closeDetail: () => void;
   openEditor: (r: Subscription | null) => void;
+  openBalance: (state: BalanceAction) => void;
   openRenew: (r: Subscription) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   setFilter: (value: string) => void;

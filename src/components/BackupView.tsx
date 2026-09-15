@@ -6,6 +6,7 @@ import { useLedger } from './ledger-context';
 import { fileSize, friendlyDate } from '@/lib/format';
 import { api } from '@/lib/api';
 import type { Backup } from '@/lib/types';
+import IntegrationsSettings from './IntegrationsSettings';
 import { ThemePicker } from './shell';
 
 interface ImportPreview {
@@ -46,18 +47,18 @@ export default function BackupView() {
       return;
     }
     try {
-      if (file.size > 2 * 1024 * 1024) throw new Error('文件超过 2 MiB');
+      if (file.size > 16 * 1024 * 1024) throw new Error('文件超过 16 MiB');
       let backup: Backup;
       try {
         backup = JSON.parse(await file.text()) as Backup;
       } catch {
         throw new Error('不是有效的 JSON 文件');
       }
-      if (!backup || backup.format !== 'subscription-ledger' || backup.version !== 1 || !Array.isArray(backup.items)) {
-        throw new Error('不是本应用导出的备份（需要 format=subscription-ledger、version=1）');
+      if (!backup || backup.format !== 'subscription-ledger' || ![1, 2].includes(backup.version) || !Array.isArray(backup.items)) {
+        throw new Error('不是本应用导出的备份（需要 format=subscription-ledger、version=1 或 2）');
       }
       const historyCount = Array.isArray(backup.renewals) ? backup.renewals.length : 0;
-      setPreview({ name: file.name, size: file.size, summary: `${backup.items.length} 条订阅 · ${historyCount} 条续费历史 · ${fileSize(file.size)}`, backup });
+      setPreview({ name: file.name, size: file.size, summary: `${backup.items.length} 条订阅 · ${historyCount} 条续费历史 · ${backup.balance_entries?.length ?? 0} 条余额流水 · ${fileSize(file.size)}`, backup });
     } catch (error) {
       setPreview({ name: file.name, size: file.size, error: error instanceof Error ? error.message : String(error) });
     }
@@ -98,7 +99,7 @@ export default function BackupView() {
     const backup = preview.backup;
     const ok = await confirm({
       title: '覆盖并恢复备份？',
-      body: `当前 ${items.length} 条订阅及全部续费历史将被「${preview.name}」中的 ${backup.items.length} 条记录替换。`,
+      body: `当前 ${items.length} 条订阅及全部续费历史、余额流水将被「${preview.name}」中的 ${backup.items.length} 条记录替换。`,
       note: '服务器会先备份现有数据库，恢复后的旧库文件名会显示在这里。',
       accept: '覆盖并恢复',
     });
@@ -124,10 +125,10 @@ export default function BackupView() {
           <div className="backup-card-head">
             <h2 id="export-title">导出备份</h2>
           </div>
-          <p className="muted">生成一份 JSON 文件，包含全部订阅与续费历史，不含登录密码。文件里有你的私人备注，请妥善保存。</p>
+          <p className="muted">生成一份 JSON 文件，包含全部订阅、余额账户及流水，不含登录密码、Bot Token 或 Agent 令牌。文件里有你的私人备注，请妥善保存。</p>
           <dl className="backup-facts">
             <dt>内容</dt>
-            <dd id="export-count">{items.length} 条订阅，含全部续费历史</dd>
+            <dd id="export-count">{items.length} 条订阅，含全部续费历史与余额流水</dd>
             <dt>文件名</dt>
             <dd id="export-name">{today ? `订阅账本-${today}.json` : '—'}</dd>
             <dt>上次导出</dt>
@@ -180,7 +181,7 @@ export default function BackupView() {
             />
             <Upload className="dropzone-icon" aria-hidden="true" />
             <span className="dropzone-title">拖入或点击选择备份 JSON</span>
-            <span className="dropzone-hint">仅接受本应用导出的文件，最大 2 MiB</span>
+            <span className="dropzone-hint">仅接受本应用导出的文件，最大 16 MiB</span>
           </label>
           {preview && (
             <div id="import-summary" className={`import-summary${preview.error ? ' error' : ''}`}>
@@ -206,7 +207,8 @@ export default function BackupView() {
           </div>
         </article>
       </div>
-      <p className="backup-note muted">本应用不会自动扣款、取消订阅或发送主动提醒。取消请前往对应服务操作，再更新这里的状态。</p>
+      <p className="backup-note muted">余额账户按计划自动记账，通知由独立 Telegram Bot 发送。本应用不会向运营商发起真实支付；取消服务请前往对应平台操作。</p>
+      <IntegrationsSettings />
       <div className="mobile-account">
         <ThemePicker mobile />
         <button id="logout-mobile" className="ghost" onClick={() => void logout()}>

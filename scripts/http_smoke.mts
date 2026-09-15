@@ -2,8 +2,10 @@
  *  需要先用 `pnpm build` 生成 .next/standalone。不涉及常驻服务、生产秘密或用户数据。
  *  运行：`pnpm smoke`
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -215,6 +217,52 @@ async function main(): Promise<void> {
       assert((await client.request(`/api/items/${ident}`, 'DELETE', { confirm: true }, token)).status === 200, '删除 1');
       assert((await client.request(`/api/items/${qid}`, 'DELETE', { confirm: true }, token)).status === 200, '删除 2');
       assert(((await client.request('/api/items')).data as unknown[]).length === 0, '删除后为空');
+      {
+      // 独立 Agent 客户端、worker 和网页共享真实 SQLite，不使用 Hermes 或真实 Telegram。
+      const agent = (await client.request('/api/tokens', 'POST', { name: '隔离验收', scope: 'write' }, token)).data;
+      const childEnv = { ...process.env, LEDGER_BASE_URL: client.base, LEDGER_API_TOKEN: agent.token, LEDGER_DATA_DIR: root };
+      const execute = promisify(execFile);
+      const skill = async (args: string[]) => {
+        const result = await execute('python3', [path.join(ROOT, 'skills/subscription-ledger/scripts/ledger.py'), ...args], { env: childEnv });
+        return JSON.parse(result.stdout);
+      };
+      const today = (await client.request('/api/summary')).data.today;
+      const yesterday = new Date(Date.parse(today + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+      const requestFile = path.join(root, 'intent.json');
+      fs.writeFileSync(requestFile, JSON.stringify({ name: '水费验收', amount: '35', cycle: 'monthly', next_date: today, status: 'cancelled', auto_renew: false, kind: 'prepaid', cost_type: 'estimated', balance: '80', balance_as_of: yesterday }));
+      const created = await skill(['POST', '/items', '--body', requestFile, '--key', 'smoke-create-01']);
+      assert((await skill(['POST', '/items', '--body', requestFile, '--key', 'smoke-create-01'])).id === created.id, 'Skill 重试不重复建账');
+      assert((await skill(['GET', '/items'])).length === 1, 'Skill 查询回读');
+      const conn = new Database(path.join(root, 'ledger.sqlite3'));
+      const old = JSON.parse((conn.prepare('SELECT payload FROM subscriptions WHERE id=?').get(created.id) as { payload: string }).payload);
+      conn.prepare('UPDATE subscriptions SET payload=? WHERE id=?').run(JSON.stringify({ ...old, status: 'active' }), created.id); conn.close();
+      await Promise.all([1, 2].map(() => execute(process.execPath, [path.join(ROOT, '.next/standalone/worker.cjs'), '--once'], { env: childEnv })));
+      assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 4500, '两个真实 worker 不重复扣减');
+      assert((await skill(['GET', `/items/${created.id}/balance-entries`])).length === 2, '只有期初和一次消费');
+      checks.push('Skill 真实 HTTP 调用、请求重试及并发 worker 扣减去重');
+      fs.writeFileSync(requestFile, JSON.stringify({ amount: '100' }));
+      await skill(['POST', `/items/${created.id}/topup`, '--body', requestFile, '--key', 'smoke-topup-01']);
+      await skill(['POST', `/items/${created.id}/topup`, '--body', requestFile, '--key', 'smoke-topup-01']);
+      assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 14500, 'Skill 重试不重复充值');
+      const balanceBackup = (await client.request('/api/export')).data;
+      assert(balanceBackup.version === 2 && balanceBackup.balance_entries.length === 3, 'v2 导出流水');
+      assert((await client.request('/api/restore', 'POST', { confirm: true, backup: balanceBackup }, token)).status === 200, 'v2 HTTP 恢复');
+      assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 14500, '恢复后令牌和余额均有效');
+      checks.push('Skill 充值去重、v2 备份恢复和令牌持久化');
+      const maintenance = path.join(ROOT, '.next/standalone/maintenance.cjs');
+      const snapshot = await execute(process.execPath, [maintenance, 'backup'], { env: childEnv });
+      assert(fs.existsSync(path.join(root, 'backups', snapshot.stdout.trim())), '迁移前备份文件');
+      await execute(process.execPath, [maintenance, 'migrate'], { env: childEnv });
+      await execute(process.execPath, [maintenance, 'migrate'], { env: childEnv });
+      await execute(process.execPath, [maintenance, 'health'], { env: childEnv });
+      assert((await skill(['GET', `/items/${created.id}`])).balance_cents === 14500, '迁移幂等且保留余额');
+      assert((await client.request('/api/openapi.json')).status === 200, '网页 API 说明可访问');
+      assert((await fetch(client.base + '/skills/subscription-ledger.zip')).status === 200, 'Skill 可下载');
+      await client.request(`/api/tokens/${agent.id}`, 'DELETE', { confirm: true }, token);
+      let revoked = false; try { await skill(['GET', '/items']); } catch { revoked = true; }
+      assert(revoked, 'Skill 令牌撤销立即生效');
+      checks.push('迁移备份、重复迁移、worker 健康检查、Skill 下载与撤销');
+      }
       assert((await client.request('/api/logout', 'POST', {}, token)).status === 200, '退出 200');
       assert((await client.request('/api/export')).status === 401, '退出后拒绝读取');
       checks.push('HTTP 删除/退出后拒绝读取');

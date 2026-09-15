@@ -1,5 +1,10 @@
 /** API 数据类型，与服务端响应一一对应。 */
 export interface Subscription {
+  kind?: 'prepaid';
+  cost_type?: 'fixed' | 'estimated';
+  balance_cents?: number;
+  balance_as_of?: string;
+  low_balance_cents?: number;
   id: string;
   name: string;
   url: string;
@@ -48,10 +53,36 @@ export interface SessionInfo {
 
 export interface Backup {
   format: 'subscription-ledger';
-  version: 1;
+  version: 1 | 2;
   currency: 'CNY';
   items: Subscription[];
   renewals: Renewal[];
+  balance_entries?: BalanceEntry[];
+}
+
+export interface BalanceEntry {
+  id: string;
+  subscription_id: string;
+  kind: 'opening' | 'charge' | 'topup' | 'reconcile' | 'bill_adjustment';
+  delta_cents: number;
+  balance_after_cents: number;
+  effective_date: string;
+  recorded_at: string;
+  source: 'web' | 'agent' | 'schedule';
+  period_date: string | null;
+  reference_id: string | null;
+  bill_amount_cents: number | null;
+  estimated: boolean;
+  notes: string;
+}
+
+export interface Reminder {
+  key: string;
+  subscription_id: string;
+  kind: 'renewal' | 'low_balance';
+  title: string;
+  text: string;
+  date: string;
 }
 
 export type ViewKey = 'recent' | 'all' | 'backup';

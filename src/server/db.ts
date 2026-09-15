@@ -33,6 +33,20 @@ function migrate(conn: Database.Database): void {
     CREATE TABLE IF NOT EXISTS subscriptions (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS renewals (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, actual_date TEXT NOT NULL, previous_date TEXT NOT NULL, next_date TEXT NOT NULL, amount_cents INTEGER, recorded_at TEXT);
     CREATE TABLE IF NOT EXISTS attempts (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, start REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS balance_entries (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      subscription_id TEXT NOT NULL, kind TEXT NOT NULL, period_date TEXT,
+      payload TEXT NOT NULL, UNIQUE(subscription_id, kind, period_date)
+    );
+    CREATE INDEX IF NOT EXISTS balance_entries_account ON balance_entries(subscription_id, sequence);
+    CREATE TABLE IF NOT EXISTS api_requests (request_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS agent_tokens (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, scope TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS notifications (
+      notification_key TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at INTEGER NOT NULL DEFAULT 0, error TEXT, sent_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS worker_state (id INTEGER PRIMARY KEY CHECK(id=1), checked_at TEXT NOT NULL, error TEXT);
   `);
   // 旧库迁移：早期续费历史没有金额与记录时间，补列后保持 NULL，表示“未记录”。
   const columns = new Set(
@@ -43,10 +57,12 @@ function migrate(conn: Database.Database): void {
   }
 }
 
-/** 测试用：关闭并丢弃缓存连接与缓存的密钥，配合新的 LEDGER_DATA_DIR 使用。 */
-export function resetStateForTests(): void {
+/** 关闭当前进程持有的数据库连接。 */
+export function closeDatabase(): void {
   if (cached) {
     cached.conn.close();
     cached = null;
   }
 }
+
+export const resetStateForTests = closeDatabase;
