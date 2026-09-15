@@ -3,6 +3,9 @@ from pathlib import Path
 import zipfile
 root = Path(__file__).resolve().parent.parent
 source = root / 'skills' / 'subscription-ledger'
+for required in ('SKILL.md', 'scripts/ledger.py'):
+    if not (source / required).is_file():
+        raise SystemExit(f'Skill package is missing required file: {required}')
 target = root / 'public' / 'skills' / 'subscription-ledger.zip'
 target.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
