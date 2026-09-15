@@ -37,6 +37,33 @@ describe('日期递推与锚点', () => {
       expect(row.anchor_day).toBe(anchor);
     }
   });
+
+  test.each([
+    [{ cycle: 'semiannual' }, '2023-08-31', ['2024-02-29', '2024-08-31', '2025-02-28', '2025-08-31']],
+    [{ cycle: 'months', months: 2 }, '2023-12-31', ['2024-02-29', '2024-04-30', '2024-06-30', '2024-08-31']],
+    [{ cycle: 'months', months: 18 }, '2024-08-31', ['2026-02-28', '2027-08-31']],
+    [{ cycle: 'years', years: 2 }, '2024-02-29', ['2026-02-28', '2028-02-29']],
+    [{ cycle: 'years', years: 3 }, '2023-12-31', ['2026-12-31', '2029-12-31']],
+  ])('半年付和自定义日历周期：%o，从 %s 开始', (patch, start, expected) => {
+    const row = validate(item({ ...patch, next_date: start }));
+    for (const date of expected) {
+      row.next_date = domain.advance(row);
+      expect(row.next_date).toBe(date);
+    }
+  });
+
+  test.each([
+    { cycle: 'months', months: 2 },
+    { cycle: 'years', years: 2 },
+  ])('编辑数量重置锚点，编辑金额保留锚点：%o', (patch) => {
+    const old = validate(item({ ...patch, next_date: '2024-02-29' }));
+    old.next_date = '2026-02-28';
+    const unchanged = validate({ ...old, amount: '20.00' }, old);
+    expect(unchanged.anchor_day).toBe(29);
+    const edited = validate({ ...old, [patch.cycle]: 3 }, old);
+    expect(edited.anchor_day).toBe(28);
+    expect(edited.anchor_month).toBe(2);
+  });
 });
 
 describe('校验', () => {
@@ -46,6 +73,27 @@ describe('校验', () => {
     { next_date: '2024-02-30' }, { auto_renew: 'yes' }, { name: '' },
   ])('非法输入被拒绝：%o', (patch) => {
     expect(() => validate(item(patch))).toThrow();
+  });
+
+  test.each([
+    ['months', 1200, '月数'], ['years', 100, '年数'],
+  ] as const)('自定义 %s 只接受范围内整数', (cycle, maximum, label) => {
+    for (const value of [undefined, null, true, '2', 0, -1, 1.5, maximum + 1, NaN, Infinity]) {
+      expect(() => validate(item({ cycle, [cycle]: value }))).toThrow(`${label}须为 1–${maximum} 的整数`);
+    }
+    for (const value of [1, maximum]) {
+      expect(validate(item({ cycle, [cycle]: value }))[cycle]).toBe(value);
+    }
+  });
+
+  test('切换周期清除不再使用的数量，旧记录无需月数年数字段', () => {
+    const old = validate(item({ cycle: 'months', months: 2 }));
+    const changed = validate({ ...old, cycle: 'years', years: 3 }, old);
+    expect(changed.months).toBeUndefined();
+    expect(changed.years).toBe(3);
+    expect(changed.days).toBeNull();
+    expect(validate(item())).not.toHaveProperty('months');
+    expect(validate(item())).not.toHaveProperty('years');
   });
 });
 
@@ -88,6 +136,29 @@ describe('统计', () => {
       expect(result.upcoming_7).toHaveLength(seven);
     }
     expect(summary([row, row, row], '2024-04-30').monthly_budget).toBe('10.00');
+  });
+
+  test.each([
+    [{ cycle: 'semiannual' }, '2.05'],
+    [{ cycle: 'months', months: 2 }, '6.15'],
+    [{ cycle: 'years', years: 2 }, '0.51'],
+  ])('日历周期预算精确折算与预测窗口：%o', (patch, budget) => {
+    const row = validate(item(patch));
+    const s = summary([row], '2024-01-31');
+    expect(s.monthly_budget).toBe(budget);
+    expect(s.forecast_30).toBe('12.30');
+    expect(s.upcoming_30.map((r) => r.next_date)).toEqual(['2024-01-31']);
+    expect(summary([row], '2024-01-01').forecast_30).toBe('0.00');
+    expect(summary([{ ...row, status: 'ended' }], '2024-01-31').monthly_budget).toBe('0.00');
+  });
+
+  test('混合日历周期预算合计后舍入', () => {
+    const rows = [
+      validate(item({ cycle: 'semiannual', amount: '0.01' })),
+      validate(item({ cycle: 'months', months: 3, amount: '0.01' })),
+      validate(item({ cycle: 'years', years: 2, amount: '0.12' })),
+    ];
+    expect(summary(rows, '2024-01-31').monthly_budget).toBe('0.01');
   });
 });
 
@@ -139,5 +210,30 @@ describe('预测快进', () => {
     row.anchor_month = 2;
     row.anchor_day = 29;
     expect(summary([row], '2028-02-01').upcoming_30[0].next_date).toBe('2028-02-29');
+  });
+
+  test.each([
+    [{ cycle: 'semiannual' }, '1900-08-31', '2024-02-01', '2024-02-29'],
+    [{ cycle: 'semiannual' }, '1900-08-31', '2024-03-01', null],
+    [{ cycle: 'months', months: 2 }, '1900-12-31', '2024-04-01', '2024-04-30'],
+    [{ cycle: 'months', months: 5 }, '1900-01-31', '2024-03-02', '2024-03-31'],
+    [{ cycle: 'months', months: 18 }, '1900-08-31', '2025-02-01', '2025-02-28'],
+    [{ cycle: 'years', years: 2 }, '1904-02-29', '2026-02-01', '2026-02-28'],
+    [{ cycle: 'years', years: 2 }, '1904-02-29', '2027-02-01', null],
+    [{ cycle: 'years', years: 3 }, '1904-02-29', '2027-02-01', '2027-02-28'],
+  ])('自定义周期快进保留月份/年份相位：%o，%s → %s', (patch, start, today, expected) => {
+    bounded(4);
+    const row = validate(item({ ...patch, next_date: start }));
+    expect(summary([row], today).upcoming_30.map((r) => r.next_date)).toEqual(expected ? [expected] : []);
+    expect(row.next_date).toBe(start);
+  });
+
+  test('多年周期手动续费后，快进保留原始月日锚点和新的年份相位', () => {
+    const row = validate(item({ cycle: 'years', years: 3, next_date: '2024-02-29' }));
+    row.next_date = '2028-05-15';
+    expect(domain.advance(row)).toBe('2031-02-28');
+    expect(summary([row], '2030-02-01').upcoming_30).toEqual([]);
+    expect(summary([row], '2031-02-01').upcoming_30[0].next_date).toBe('2031-02-28');
+    expect(summary([row], '2040-02-01').upcoming_30[0].next_date).toBe('2040-02-29');
   });
 });

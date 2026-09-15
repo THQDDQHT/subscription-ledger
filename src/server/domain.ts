@@ -13,8 +13,10 @@ export interface SubscriptionRecord {
   notes: string;
   amount_cents: number;
   amount: string;
-  cycle: 'monthly' | 'quarterly' | 'yearly' | 'days';
+  cycle: 'monthly' | 'quarterly' | 'semiannual' | 'yearly' | 'days' | 'months' | 'years';
   days: number | null;
+  months?: number;
+  years?: number;
   next_date: string;
   auto_renew: boolean;
   status: string;
@@ -115,10 +117,14 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
   }
   const amountCents = parseAmount(input.amount);
   const cycle = input.cycle;
-  if (cycle !== 'monthly' && cycle !== 'quarterly' && cycle !== 'yearly' && cycle !== 'days') fail('周期不正确');
-  const days = input.days;
-  if (cycle === 'days' && (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 36500)) {
-    fail('天数须为 1–36500 的整数');
+  if (cycle !== 'monthly' && cycle !== 'quarterly' && cycle !== 'semiannual' && cycle !== 'yearly' && cycle !== 'days' && cycle !== 'months' && cycle !== 'years') fail('周期不正确');
+  const custom = cycle === 'days' || cycle === 'months' || cycle === 'years';
+  const interval = custom ? input[cycle] : undefined;
+  if (custom) {
+    const [label, maximum] = cycle === 'days' ? ['天数', 36500] as const : cycle === 'months' ? ['月数', 1200] as const : ['年数', 100] as const;
+    if (typeof interval !== 'number' || !Number.isInteger(interval) || interval < 1 || interval > maximum) {
+      fail(`${label}须为 1–${maximum} 的整数`);
+    }
   }
   const nextDate = parseDate(input.next_date);
   if (typeof input.auto_renew !== 'boolean') fail('自动续费须为开关值');
@@ -126,7 +132,8 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
   const end = input.end_date;
   const endDate = end ? parseDate(end) : null;
   // 显式编辑计划日期/周期会重置锚点；确认续费不会。
-  const keep = previous !== undefined && previous.next_date === nextDate && previous.cycle === cycle;
+  const keep = previous !== undefined && previous.next_date === nextDate && previous.cycle === cycle &&
+    (!custom || previous[cycle] === interval);
   const record: SubscriptionRecord = {
     name,
     url,
@@ -134,7 +141,9 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
     amount_cents: amountCents,
     amount: money(amountCents),
     cycle,
-    days: cycle === 'days' ? (days as number) : null,
+    days: cycle === 'days' ? (interval as number) : null,
+    ...(cycle === 'months' ? { months: interval as number } : {}),
+    ...(cycle === 'years' ? { years: interval as number } : {}),
     next_date: nextDate,
     auto_renew: input.auto_renew,
     status: input.status,
@@ -160,17 +169,30 @@ export function money(cents: number): string {
 }
 
 export function advance(r: SubscriptionRecord): string {
-  const [year, month, day] = r.next_date.split('-').map(Number);
+  const [year, month] = r.next_date.split('-').map(Number);
   if (r.cycle === 'days') return addDays(r.next_date, r.days as number);
-  if (r.cycle === 'monthly' || r.cycle === 'quarterly') {
-    const step = r.cycle === 'quarterly' ? 3 : 1;
+  if (r.cycle !== 'yearly' && r.cycle !== 'years') {
+    const step = calendarMonths(r);
     const total = year * 12 + (month - 1) + step;
     const y = Math.floor(total / 12);
     const m = (total % 12) + 1;
     return iso(y, m, Math.min(r.anchor_day, daysInMonth(y, m)));
   }
-  const y = year + 1;
+  const y = year + calendarMonths(r) / 12;
   return iso(y, r.anchor_month, Math.min(r.anchor_day, daysInMonth(y, r.anchor_month)));
+}
+
+/** 日历周期统一折算为月数；天数周期单独按天计算。 */
+function calendarMonths(r: SubscriptionRecord): number {
+  switch (r.cycle) {
+    case 'monthly': return 1;
+    case 'quarterly': return 3;
+    case 'semiannual': return 6;
+    case 'yearly': return 12;
+    case 'months': return r.months as number;
+    case 'years': return (r.years as number) * 12;
+    case 'days': return fail('天数周期不能按日历月计算');
+  }
 }
 
 function iso(y: number, m: number, d: number): string {
@@ -198,10 +220,8 @@ export function summary(rows: SubscriptionRecord[], today: string): Summary {
     const cents = BigInt(r.amount_cents);
     let num: bigint;
     let den: bigint;
-    if (r.cycle === 'monthly') [num, den] = [cents, 1n];
-    else if (r.cycle === 'quarterly') [num, den] = [cents, 3n];
-    else if (r.cycle === 'yearly') [num, den] = [cents, 12n];
-    else [num, den] = [cents * 365n, BigInt(r.days as number) * 12n];
+    if (r.cycle === 'days') [num, den] = [cents * 365n, BigInt(r.days as number) * 12n];
+    else [num, den] = [cents, BigInt(calendarMonths(r))];
     budgetNum = budgetNum * den + num * budgetDen;
     budgetDen *= den;
     if (r.next_date < today) overdue.push(r);
@@ -218,8 +238,8 @@ export function summary(rows: SubscriptionRecord[], today: string): Summary {
         const [ty, tm] = today.split('-').map(Number);
         let y: number;
         let m: number;
-        if (r.cycle === 'monthly' || r.cycle === 'quarterly') {
-          const step = r.cycle === 'quarterly' ? 3 : 1;
+        if (r.cycle !== 'yearly' && r.cycle !== 'years') {
+          const step = calendarMonths(r);
           const elapsed = (ty - py) * 12 + tm - pm;
           // 保持计划的月份相位，包括手工确认过的日期。
           const periods = Math.max(1, Math.floor(elapsed / step));
@@ -227,7 +247,9 @@ export function summary(rows: SubscriptionRecord[], today: string): Summary {
           y = Math.floor(total / 12);
           m = (total % 12) + 1;
         } else {
-          y = ty;
+          const step = calendarMonths(r) / 12;
+          const periods = Math.max(1, Math.floor((ty - py) / step));
+          y = py + periods * step;
           m = r.anchor_month;
         }
         candidate = iso(y, m, Math.min(r.anchor_day, daysInMonth(y, m)));

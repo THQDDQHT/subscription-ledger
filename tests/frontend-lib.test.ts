@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { selectGroups, parseRoute, routeURL } from '@/lib/grouping';
-import { money, moneyCents, friendlyDate, relativeDay, historySummary, recordedAt } from '@/lib/format';
+import { money, moneyCents, friendlyDate, relativeDay, historySummary, recordedAt, cycleLabel } from '@/lib/format';
 import type { Subscription } from '@/lib/types';
 
 const TODAY = '2026-09-12';
@@ -88,6 +88,14 @@ describe('路由解析', () => {
 });
 
 describe('格式化', () => {
+  test('周期标签显示半年付和自定义数量及单位', () => {
+    expect(cycleLabel({ cycle: 'semiannual' })).toBe('半年付');
+    expect(cycleLabel({ cycle: 'months', months: 2 })).toBe('每 2 个月');
+    expect(cycleLabel({ cycle: 'years', years: 3 })).toBe('每 3 年');
+    expect(cycleLabel({ cycle: 'days', days: 60 })).toBe('每 60 天');
+    expect(cycleLabel({ cycle: 'months', months: '…' })).toBe('每 … 个月');
+  });
+
   test('金额千分位', () => {
     expect(money('138.00')).toBe('¥138.00');
     expect(money('34323.97')).toBe('¥34,323.97');

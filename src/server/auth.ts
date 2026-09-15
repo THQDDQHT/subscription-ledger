@@ -86,7 +86,8 @@ export function rotateSessionSecret(): void {
 }
 
 const SESSION_COOKIE = 'ledger_session';
-export const SESSION_TTL_SECONDS = 12 * 3600;
+// 从登录时起固定有效 30 天，访问页面不会续期。
+export const SESSION_TTL_SECONDS = 30 * 24 * 3600;
 
 export interface SessionData {
   authenticated: boolean;

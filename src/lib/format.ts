@@ -38,8 +38,16 @@ export function relativeDay(iso: string, today: string): { text: string; cls: st
   return { text: `还剩 ${days} 天`, cls: days < 7 ? 'soon' : '' };
 }
 
-export function cycleLabel(r: { cycle: string; days?: number | string | null }): string {
-  return r.cycle === 'monthly' ? '月付' : r.cycle === 'quarterly' ? '季付' : r.cycle === 'yearly' ? '年付' : `每 ${r.days} 天`;
+export function cycleLabel(r: { cycle: string; days?: number | string | null; months?: number | string; years?: number | string }): string {
+  switch (r.cycle) {
+    case 'monthly': return '月付';
+    case 'quarterly': return '季付';
+    case 'semiannual': return '半年付';
+    case 'yearly': return '年付';
+    case 'months': return `每 ${r.months} 个月`;
+    case 'years': return `每 ${r.years} 年`;
+    default: return `每 ${r.days} 天`;
+  }
 }
 
 /** 续费历史标题摘要：合计只累加记录了金额的条目，早期无金额记录如实说明。 */

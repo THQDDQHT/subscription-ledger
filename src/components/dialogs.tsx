@@ -98,6 +98,9 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
   const { ref, onBackdrop } = useModalDialog(open, onClose);
   const { busy, error, run } = useSubmitGuard();
   const [cycle, setCycle] = useState('monthly');
+  const customCycle = cycle === 'days' || cycle === 'months' || cycle === 'years' ? cycle : null;
+  const customLabel = cycle === 'months' ? '月数' : cycle === 'years' ? '年数' : '天数';
+  const customMax = cycle === 'months' ? 1200 : cycle === 'years' ? 100 : 36500;
   const [extraOpen, setExtraOpen] = useState(false);
   const [preview, setPreview] = useState('填写费用与日期，建立你的续费计划。');
 
@@ -114,12 +117,20 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
     const next = String(f.get('next_date') ?? '');
     const c = String(f.get('cycle') ?? 'monthly');
     const days = String(f.get('days') ?? '');
+    const months = String(f.get('months') ?? '');
+    const years = String(f.get('years') ?? '');
     setPreview(
       amount && next
-        ? `${cycleLabel({ cycle: c, days: days || '…' })} · 每期 ${money(amount)} · 下次 ${next}（${friendlyDate(next, today)}）`
+        ? `${cycleLabel({ cycle: c, days: days || '…', months: months || '…', years: years || '…' })} · 每期 ${money(amount)} · 下次 ${next}（${friendlyDate(next, today)}）`
         : '填写费用与日期，建立你的续费计划。',
     );
   };
+
+  // 等周期字段挂载或编辑值回填后再刷新预览。
+  useEffect(() => {
+    const form = ref.current?.querySelector('form');
+    if (open && form) updatePreview(form);
+  }, [cycle, editing, open, today]);
 
   const submit = (form: HTMLFormElement) => {
     run(async () => {
@@ -127,6 +138,8 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
       const record: Record<string, unknown> = {};
       for (const key of ['name', 'amount', 'cycle', 'next_date', 'status', 'url', 'notes']) record[key] = String(f.get(key) ?? '');
       record.days = record.cycle === 'days' ? Number(f.get('days')) : null;
+      if (record.cycle === 'months') record.months = Number(f.get('months'));
+      if (record.cycle === 'years') record.years = Number(f.get('years'));
       record.end_date = String(f.get('end_date') ?? '') || null;
       record.auto_renew = f.get('auto_renew') === 'on';
       clearReport();
@@ -181,16 +194,25 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
                 <select name="cycle" value={cycle} onChange={(e) => setCycle(e.target.value)}>
                   <option value="monthly">月付</option>
                   <option value="quarterly">季付（每 3 个日历月）</option>
+                  <option value="semiannual">半年付（每 6 个日历月）</option>
                   <option value="yearly">年付</option>
                   <option value="days">自定义天数</option>
+                  <option value="months">自定义月数</option>
+                  <option value="years">自定义年数</option>
                 </select>
               </label>
             </div>
-            {cycle === 'days' && (
-              <label id="days-field">
-                每周期天数
-                <input name="days" type="number" min={1} max={36500} step={1} required defaultValue={editing?.days ?? ''} />
-              </label>
+            {customCycle && (
+              <div key={customCycle}>
+                <label>
+                  每周期{customLabel}
+                  <input name={customCycle} type="number" inputMode="numeric" min={1} max={customMax} step={1} required defaultValue={editing?.[customCycle] ?? ''} aria-describedby="cycle-hint" />
+                </label>
+                <p id="cycle-hint" className="field-note">
+                  {customCycle === 'days' ? '按固定天数递推。' : customCycle === 'months' ? '按日历月递推，例如填 2 表示每 2 个月续费。' : '按日历年递推，例如填 2 表示每 2 年续费。'}
+                  {customCycle !== 'days' && '目标月份没有对应日期时，取当月最后一天。'}
+                </p>
+              </div>
             )}
             <label>
               下次扣款 / 续费日期

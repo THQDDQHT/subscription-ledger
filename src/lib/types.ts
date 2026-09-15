@@ -6,8 +6,10 @@ export interface Subscription {
   notes: string;
   amount_cents: number;
   amount: string;
-  cycle: 'monthly' | 'quarterly' | 'yearly' | 'days';
+  cycle: 'monthly' | 'quarterly' | 'semiannual' | 'yearly' | 'days' | 'months' | 'years';
   days: number | null;
+  months?: number;
+  years?: number;
   next_date: string;
   auto_renew: boolean;
   status: 'active' | 'cancelling' | 'cancelled' | 'ended';
