@@ -26,8 +26,8 @@
    备份保存于现有数据卷的 `/data/backups/pre-upgrade-*.sqlite3`，记录实际文件名；迁移新增余额流水、请求去重、Agent 令牌、通知及 worker 状态表，保留全部原订阅和续费历史。任一步失败则停止升级，不自动覆盖数据或回滚。
 
 6. `docker compose up -d ledger worker`，核对网页访问、未登录隔离、worker 健康状态、日志、镜像 revision 和数据条数。
-7. 把仓库 `skills/subscription-ledger` 安装到现有 Hermes 数据目录的 `skills/subscription-ledger`。只安装这项新 Skill；已有同名目录时先比较并保留备份。
-8. 在账本设置页配置专用 Telegram Bot、选择本人 Chat ID 并发送测试；此步骤需要用户新 Bot 信息，目前尚未提供。通过设置页创建 Hermes 的独立令牌，配置其 `LEDGER_BASE_URL` 和 `LEDGER_API_TOKEN` 后执行只读回验。新令牌只在服务器秘密配置中传递，不输出到聊天或提交 Git。
+7. 验证线上 Skill ZIP 下载，向用户提供仓库 `skills/subscription-ledger` 链接。用户已决定让 Hermes 自行安装和配置 Skill，本次部署不修改 Hermes 环境。
+8. 专用 Telegram Bot 在账本设置页配置，选择本人 Chat ID 后可发送测试；目前尚未提供新 Bot 信息。Hermes 接入时，通过设置页创建独立令牌，再配置 `LEDGER_BASE_URL` 和 `LEDGER_API_TOKEN` 并执行只读回验。新令牌仅保存到 Agent 的秘密配置，不输出到聊天或提交 Git。
 
 账本的扣减和通知不依赖第 7–8 步中的 Hermes 接入。新 Bot 配置前 Telegram 默认关闭，worker 仍正常记账。不得从现有 Hermes Telegram 配置中取值作为账本 Bot。
 
@@ -35,4 +35,4 @@
 
 部署前版本：`e8bbc57305db41d8813472cebeed0640e28aab28`。保留原镜像 digest 和升级前数据库备份。回滚需另行确认，停止网页和 worker，先保存当前数据再恢复选定数据库及旧镜像；升级后新增的流水需要从保留副本人工核对，不能悄悄丢弃。
 
-本次开发只完成本地实现、测试和服务器只读预检，尚未 push、部署或执行生产迁移。真实 Telegram 发送、Hermes 运行时调用和服务器镜像运行需部署后验证。
+用户已授权推送代码、打包并更新服务器。本计划描述部署顺序，实际结果以执行后的部署记录为准。真实 Telegram 发送与 Hermes 运行时调用仍需完成各自配置后验证。

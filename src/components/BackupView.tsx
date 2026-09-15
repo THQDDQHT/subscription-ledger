@@ -120,12 +120,13 @@ export default function BackupView() {
 
   return (
     <section id="backup-page" className="backup">
+      <header className="settings-section-heading"><h2>数据备份</h2><p>导出一份账本副本，或从已有备份恢复。</p></header>
       <div className="backup-grid">
         <article className="backup-card" aria-labelledby="export-title">
           <div className="backup-card-head">
             <h2 id="export-title">导出备份</h2>
           </div>
-          <p className="muted">生成一份 JSON 文件，包含全部订阅、余额账户及流水，不含登录密码、Bot Token 或 Agent 令牌。文件里有你的私人备注，请妥善保存。</p>
+          <p className="muted">导出全部订阅、余额账户和流水，不包含密码与访问令牌。</p>
           <dl className="backup-facts">
             <dt>内容</dt>
             <dd id="export-count">{items.length} 条订阅，含全部续费历史与余额流水</dd>
@@ -146,7 +147,7 @@ export default function BackupView() {
             <h2 id="restore-title">恢复备份</h2>
             <span className="backup-tag">覆盖操作</span>
           </div>
-          <p className="muted">用一份导出的 JSON 覆盖当前全部记录。恢复前服务器会先备份旧数据库，完成后在这里显示备份文件名。</p>
+          <p className="muted">从 JSON 恢复全部记录。覆盖前会自动备份现有数据。</p>
           <label
             className={`dropzone${dragOver ? ' is-over' : ''}`}
             id="dropzone"
@@ -207,8 +208,8 @@ export default function BackupView() {
           </div>
         </article>
       </div>
-      <p className="backup-note muted">余额账户按计划自动记账，通知由独立 Telegram Bot 发送。本应用不会向运营商发起真实支付；取消服务请前往对应平台操作。</p>
       <IntegrationsSettings />
+      <p className="backup-note muted">账本只记录余额变化，不会发起真实支付。订阅取消仍需前往对应平台操作。</p>
       <div className="mobile-account">
         <ThemePicker mobile />
         <button id="logout-mobile" className="ghost" onClick={() => void logout()}>
