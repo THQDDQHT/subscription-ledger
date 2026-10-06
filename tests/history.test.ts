@@ -101,7 +101,8 @@ test('计划日期被编辑后拒绝撤销；已取消状态仍可撤销', async
   expect(((await res.json()) as { error: string }).error).toContain('已被修改');
   expect((await client.json('/api/items') as Array<{ next_date: string }>)[0].next_date).toBe('2024-03-15');
   // 撤销不要求状态为使用中：改成已取消后仍能撤回记录错误的续费。
-  expect((await post(client, `/api/items/${ident}`, item({ next_date: '2024-02-29', status: 'cancelled' }), 'put')).status).toBe(200);
+  expect((await post(client, `/api/items/${ident}`, item({ next_date: '2024-02-29' }), 'put')).status).toBe(200);
+  expect((await post(client, `/api/items/${ident}/cancel`, { confirm: true, end_date: '2024-03-01' })).status).toBe(200);
   expect((await post(client, `/api/items/${ident}/renewals/${rid}/undo`, { confirm: true })).status).toBe(200);
   expect((await client.json('/api/items') as Array<{ next_date: string }>)[0].next_date).toBe('2024-01-31');
 });

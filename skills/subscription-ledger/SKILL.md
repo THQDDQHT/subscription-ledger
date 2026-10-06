@@ -30,13 +30,18 @@ required_environment_variables:
 | 用户意图 | 接口与关键字段 |
 | --- | --- |
 | 新增记录 | POST `/items`，字段见下方示例或 `/openapi.json` |
-| 改名称、计划、费用、暂停 | GET `/items/{id}` 后 PUT 完整记录，修改指定字段；`cancelled` 暂停扣减，`active` 恢复 |
+| 改名称、计划、费用、暂停 | GET `/items/{id}` 后 PUT 完整记录，修改指定字段；余额账户用 `cancelled` 暂停扣减，`active` 恢复 |
+| 「准备取消」 | GET 后 PUT 完整记录，`status` 改为 `cancelling`；仍计入预算，临近续费日会提醒取消 |
+| 「取消订阅」 | 用户确认已在服务方取消后，POST `/items/{id}/cancel`，`{"confirm":true,"end_date":"服务可用截止日","cancelled_at":"取消日期，默认今天","reason":"原因，可选"}`；截止日须向用户问清，不能猜。仅限普通订阅的使用中或准备取消记录 |
+| 「恢复订阅」 | POST `/items/{id}/reactivate`，`{"confirm":true,"next_date":"不早于今天的下次续费日","auto_renew":false}`；仅限已取消或已结束的普通订阅 |
 | “充值了 100” | POST `/items/{id}/topup`，`{"amount":"100.00"}`，增加余额 |
 | “实际还剩 83” | POST `/items/{id}/reconcile`，`{"balance":"83.00"}`，对齐今天的实际余额，可为负 |
 | “这期实际水费 41” | GET `/items/{id}/balance-entries` 定位该期 `charge`；POST `/items/{id}/bill`，`{"entry_id":"…","amount":"41.00"}` |
 | 已续费 | POST `/items/{id}/renew`，`confirm:true`、`actual_date`、`next_date`、`amount`；下次默认建议可从单条记录的 `suggested_next` 获取 |
 | 删除记录 | 仅在用户明确要求删除时 DELETE `/items/{id}`，`{"confirm":true}`，会删除全部流水 |
 | 待续费、余额不足 | GET `/reminders`；查询没有发送或确认副作用 |
+
+POST 新建和 PUT 都不能把普通订阅设为 `cancelled`，必须用 `cancel` 操作以记录取消日期与原因；已取消的记录仍可 PUT 修改备注、截止日等。已取消且 `end_date` 早于今天的记录，`effective_status` 为 `ended`（存储的 `status` 不变）；`cancelled_at`、`cancel_reason`、`effective_status` 是只读字段。账本不会替用户在服务方取消，用户未确认已取消前不要调用 `cancel`。
 
 充值、校正、实际账单是不同操作。实际账单填本期**总额**，服务端只调整与已记账金额的差额；如果之后已经核对过真实余额，补录仅修正历史，不再影响当前余额。
 

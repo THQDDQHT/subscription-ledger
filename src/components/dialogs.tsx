@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import { useLedger, type ConfirmOptions } from './ledger-context';
 import { cycleLabel, friendlyDate, money } from '@/lib/format';
 import { api } from '@/lib/api';
@@ -275,7 +275,7 @@ export function EditorDialog({ editing, onClose }: { editing: Subscription | nul
                 { value: 'cancelling', label: '准备取消' },
                 { value: 'cancelled', label: kind === 'prepaid' ? '暂停自动扣减' : '已取消续费' },
                 { value: 'ended', label: '已结束' },
-              ]} />
+              ].filter((o) => o.value !== 'cancelled' || kind === 'prepaid' || editing?.status === 'cancelled')} />
             </label>
             <details
               id="extra-fields"
@@ -402,6 +402,177 @@ export function RenewDialog({ renewing, onClose }: { renewing: Subscription | nu
             <span className="grow" />
             <button type="submit" disabled={busy}>
               {busy ? '保存中…' : '确认保存'}
+            </button>
+          </div>
+        </form>
+      )}
+    </dialog>
+  );
+}
+
+// ---------- 记录取消 ----------
+
+export function CancelDialog({ cancelling, onClose }: { cancelling: Subscription | null; onClose: () => void }) {
+  const open = cancelling !== null;
+  const { today, load, reportOk, reportError, clearReport, setFocusKey } = useLedger();
+  const { ref, onBackdrop } = useModalDialog(open, onClose);
+  const { busy, error, run } = useSubmitGuard();
+
+  const submit = (form: HTMLFormElement) => {
+    if (!cancelling) return;
+    run(async () => {
+      const f = new FormData(form);
+      const endDate = String(f.get('end_date') ?? '');
+      clearReport();
+      await api(`/api/items/${cancelling.id}/cancel`, 'POST', {
+        cancelled_at: String(f.get('cancelled_at') ?? ''),
+        end_date: endDate,
+        reason: String(f.get('reason') ?? ''),
+        confirm: f.get('confirm') === 'on',
+      });
+      onClose();
+      setFocusKey(`${cancelling.id}:detail`);
+      try {
+        await load();
+      } catch (e) {
+        reportError(`已记录取消，但列表刷新失败：${e instanceof Error ? e.message : e}`);
+        return;
+      }
+      reportOk(`已取消「${cancelling.name}」，服务可用至 ${endDate}`);
+    });
+  };
+
+  return (
+    <dialog id="cancel-dialog" aria-labelledby="cancel-title" ref={ref} onClick={onBackdrop}>
+      {cancelling && (
+        <form
+          id="cancel-form"
+          key={cancelling.id}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit(e.currentTarget);
+          }}
+        >
+          <div className="dialog-head">
+            <h2 id="cancel-title">取消订阅</h2>
+            <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          <div className="dialog-body">
+            <p id="cancel-name">{cancelling.name}</p>
+            <p className="field-note">
+              当前计划日期 {cancelling.next_date}（{friendlyDate(cancelling.next_date, today)}）· 每期 {money(cancelling.amount)}（{cycleLabel(cancelling)}）
+            </p>
+            <p>账本不会替你取消。取消后不再计入预算和提醒。</p>
+            {cancelling.url && (
+              <a className="detail-link" href={cancelling.url} target="_blank" rel="noopener noreferrer">
+                前往管理订阅
+                <ExternalLink aria-hidden="true" />
+              </a>
+            )}
+            <div className="columns">
+              <label>
+                取消日期
+                <input type="date" name="cancelled_at" required min="1900-01-01" max={today || '2100-12-31'} defaultValue={today} />
+              </label>
+              <label>
+                服务可用截止日
+                <input type="date" name="end_date" required min="1900-01-01" max="2100-12-31" defaultValue={cancelling.next_date >= today ? cancelling.next_date : today} />
+              </label>
+            </div>
+            <label>
+              取消原因（可选）
+              <textarea name="reason" rows={3} maxLength={500} />
+            </label>
+            <label className="check">
+              <input type="checkbox" name="confirm" required />
+              我已在服务方完成取消
+            </label>
+            <p id="cancel-error" className="error" role="alert">{error}</p>
+          </div>
+          <div className="dialog-foot">
+            <button type="button" className="ghost" onClick={onClose}>
+              返回
+            </button>
+            <span className="grow" />
+            <button type="submit" disabled={busy}>
+              {busy ? '保存中…' : '确认取消'}
+            </button>
+          </div>
+        </form>
+      )}
+    </dialog>
+  );
+}
+
+// ---------- 恢复订阅 ----------
+
+export function ReactivateDialog({ reactivating, onClose }: { reactivating: Subscription | null; onClose: () => void }) {
+  const open = reactivating !== null;
+  const { today, load, reportOk, reportError, clearReport, setFocusKey } = useLedger();
+  const { ref, onBackdrop } = useModalDialog(open, onClose);
+  const { busy, error, run } = useSubmitGuard();
+
+  const submit = (form: HTMLFormElement) => {
+    if (!reactivating) return;
+    run(async () => {
+      const f = new FormData(form);
+      clearReport();
+      await api(`/api/items/${reactivating.id}/reactivate`, 'POST', {
+        next_date: String(f.get('next_date') ?? ''),
+        auto_renew: f.get('auto_renew') === 'on',
+        confirm: true,
+      });
+      onClose();
+      setFocusKey(`${reactivating.id}:detail`);
+      try {
+        await load();
+      } catch (e) {
+        reportError(`已恢复，但列表刷新失败：${e instanceof Error ? e.message : e}`);
+        return;
+      }
+      reportOk(`已恢复「${reactivating.name}」`);
+    });
+  };
+
+  return (
+    <dialog id="reactivate-dialog" aria-labelledby="reactivate-title" ref={ref} onClick={onBackdrop}>
+      {reactivating && (
+        <form
+          id="reactivate-form"
+          key={reactivating.id}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit(e.currentTarget);
+          }}
+        >
+          <div className="dialog-head">
+            <h2 id="reactivate-title">恢复订阅</h2>
+            <button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          <div className="dialog-body">
+            <p id="reactivate-name">{reactivating.name}</p>
+            <p>恢复后重新计入预算和提醒，取消记录与服务可用截止日会被清除。</p>
+            <label>
+              下次续费日期
+              <input type="date" name="next_date" required min={today || '1900-01-01'} max="2100-12-31" defaultValue={reactivating.next_date >= today ? reactivating.next_date : today} />
+            </label>
+            <label className="check">
+              <input name="auto_renew" type="checkbox" />
+              已在订阅平台开启自动续费（仅记录）
+            </label>
+            <p id="reactivate-error" className="error" role="alert">{error}</p>
+          </div>
+          <div className="dialog-foot">
+            <button type="button" className="ghost" onClick={onClose}>
+              返回
+            </button>
+            <span className="grow" />
+            <button type="submit" disabled={busy}>
+              {busy ? '保存中…' : '确认恢复'}
             </button>
           </div>
         </form>

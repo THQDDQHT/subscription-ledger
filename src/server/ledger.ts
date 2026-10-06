@@ -1,7 +1,7 @@
 /** 网页、Agent、定时任务共用的记账操作。事务覆盖余额、流水和请求去重。 */
 import crypto from 'node:crypto';
 import { db } from './db';
-import { domain, validate, parseDate, parseAmount, parseBalance, parseBalanceCents, nowIsoInShanghai, todayInShanghai, DomainError, type SubscriptionRecord } from './domain';
+import { domain, validate, parseDate, parseAmount, parseCancelReason, parseBalance, parseBalanceCents, nowIsoInShanghai, todayInShanghai, DomainError, type SubscriptionRecord } from './domain';
 import type { BalanceEntry } from '../lib/types';
 
 export type Item = SubscriptionRecord & { id: string };
@@ -23,7 +23,7 @@ export function requireItem(id: string): Item {
   return r;
 }
 export function saveItem(r: Item): void {
-  const { id, suggested_next: _next, ...payload } = r;
+  const { id, suggested_next: _next, effective_status: _effective, ...payload } = r;
   db().prepare('UPDATE subscriptions SET payload=? WHERE id=?').run(JSON.stringify(payload), id);
 }
 export function entries(id?: string): BalanceEntry[] {
@@ -90,6 +90,7 @@ function apply(action: string, id: string, data: Record<string, unknown>, source
   const conn = db();
   if (action === 'create') {
     const clean = validate(data);
+    if (clean.kind !== 'prepaid' && clean.status === 'cancelled') throw new DomainError('取消订阅请使用取消操作，以记录取消日期与原因');
     const r = { ...clean, id: newId() };
     conn.prepare('INSERT INTO subscriptions VALUES (?,?)').run(r.id, JSON.stringify(clean));
     if (r.kind === 'prepaid') {
@@ -115,8 +116,37 @@ function apply(action: string, id: string, data: Record<string, unknown>, source
       const latest = conn.prepare("SELECT MAX(period_date) AS date FROM balance_entries WHERE subscription_id=? AND kind='charge'").get(id) as { date: string | null };
       if (latest.date && clean.next_date <= latest.date) throw new DomainError('下次扣减日期须晚于最后一个已扣减账期');
     }
+    if (r.kind !== 'prepaid' && clean.status === 'cancelled' && r.status !== 'cancelled') {
+      throw new DomainError('取消订阅请使用取消操作，以记录取消日期与原因');
+    }
     saveItem({ ...clean, id });
     return { data: { ok: true } };
+  }
+  if (action === 'cancel') {
+    if (r.kind === 'prepaid') throw new DomainError('余额账户请在编辑中暂停自动扣减');
+    if (r.status !== 'active' && r.status !== 'cancelling') throw new DomainError('只有使用中或准备取消的订阅可以取消');
+    if (data.confirm !== true) throw new DomainError('取消订阅需要明确确认');
+    const today = todayInShanghai();
+    const cancelledAt = data.cancelled_at === undefined || data.cancelled_at === null ? today : parseDate(data.cancelled_at);
+    if (cancelledAt > today) throw new DomainError('取消日期不能在未来');
+    const cancelReason = parseCancelReason(data.reason ?? '');
+    Object.assign(r, { status: 'cancelled', auto_renew: false, end_date: parseDate(data.end_date), cancelled_at: cancelledAt, cancel_reason: cancelReason });
+    saveItem(r);
+    return { data: { ok: true, item: r } };
+  }
+  if (action === 'reactivate') {
+    if (r.kind === 'prepaid') throw new DomainError('余额账户请在编辑中恢复自动扣减');
+    if (r.status !== 'cancelled' && r.status !== 'ended') throw new DomainError('只有已取消或已结束的订阅可以恢复');
+    if (data.confirm !== true) throw new DomainError('恢复订阅需要明确确认');
+    const nextDate = parseDate(data.next_date);
+    if (nextDate < todayInShanghai()) throw new DomainError('下次续费日期不能早于今天');
+    if (data.auto_renew !== undefined && typeof data.auto_renew !== 'boolean') throw new DomainError('自动续费须为开关值');
+    const { cancelled_at: _at, cancel_reason: _reason, ...rest } = r;
+    // 日期改动后按新日期重置锚点，与编辑计划日期的规则一致。
+    const anchors = nextDate === r.next_date ? {} : { anchor_day: Number(nextDate.slice(8, 10)), anchor_month: Number(nextDate.slice(5, 7)) };
+    const restored: Item = { ...rest, ...anchors, status: 'active', end_date: null, auto_renew: data.auto_renew === true, next_date: nextDate };
+    saveItem(restored);
+    return { data: { ok: true, item: restored } };
   }
   if (r.kind !== 'prepaid') throw new DomainError('该操作仅适用于余额账户');
   const notes = data.notes ?? '';

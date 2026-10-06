@@ -48,6 +48,8 @@ export interface LedgerContextValue {
   openEditor: (r: Subscription | null) => void;
   openBalance: (state: BalanceAction) => void;
   openRenew: (r: Subscription) => void;
+  openCancel: (r: Subscription) => void;
+  openReactivate: (r: Subscription) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   setFilter: (value: string) => void;
   setSort: (value: 'date' | 'name' | 'amount') => void;

@@ -10,6 +10,7 @@ import Database from 'better-sqlite3';
 import { db, dataRoot } from './db';
 import { rows, getRow, command, HttpError, entries, type Source } from './ledger';
 import { authenticateAgent, createToken, listTokens } from './agent-auth';
+import { effectiveStatus } from '../lib/status';
 import { reminders, notificationStatus, saveSettings, sendTelegram, telegramChats } from './notifications';
 import { openapi } from './openapi';
 import { validateBalanceEntries } from './balance-backup';
@@ -133,7 +134,11 @@ function logout(): Response {
 
 function listItems(): Response {
   const result = rows();
-  for (const r of result) r.suggested_next = domain.advance(r);
+  const today = todayInShanghai();
+  for (const r of result) {
+    r.suggested_next = domain.advance(r);
+    r.effective_status = effectiveStatus(r, today);
+  }
   result.sort((a, b) => (a.next_date < b.next_date ? -1 : a.next_date > b.next_date ? 1 : 0));
   return json(result);
 }
@@ -352,7 +357,7 @@ route('POST', '/api/logout', logout);
 route('GET', '/api/items', listItems);
 route('GET', '/api/items/<id>', ctx => {
   const r = getRow(ctx.params.id);
-  return r ? json({ ...r, suggested_next: domain.advance(r) }) : json({ error: '记录不存在' }, 404);
+  return r ? json({ ...r, suggested_next: domain.advance(r), effective_status: effectiveStatus(r, todayInShanghai()) }) : json({ error: '记录不存在' }, 404);
 });
 route('GET', '/api/summary', stats);
 route('POST', '/api/items', addItem);
@@ -383,6 +388,8 @@ route('DELETE', '/api/tokens/<id>', ctx => {
 route('PUT', '/api/items/<id>', changeItem);
 route('DELETE', '/api/items/<id>', changeItem);
 route('POST', '/api/items/<id>/renew', renew);
+route('POST', '/api/items/<id>/cancel', ctx => itemCommand(ctx, 'cancel'));
+route('POST', '/api/items/<id>/reactivate', ctx => itemCommand(ctx, 'reactivate'));
 route('GET', '/api/items/<id>/renewals', listRenewals);
 route('POST', '/api/items/<id>/renewals/<rid>/undo', undoRenewal);
 route('GET', '/api/export', exportData);
@@ -413,7 +420,7 @@ export async function handleApi(req: Request): Promise<Response> {
     if (restoringDatabase) return json({ error: '正在恢复备份，请稍后重试' }, 503);
     const agent = isAgent ? authenticateAgent(req) : null;
     if (isAgent && !agent) return json({ error: 'Agent 访问令牌无效或已撤销' }, 401);
-    if (isAgent && !/^\/api\/(items(?:\/[a-f0-9]{32}(?:\/(?:renew|renewals|balance-entries|topup|reconcile|bill)(?:\/[a-f0-9]{32}\/undo)?)?)?|summary|reminders|openapi\.json)$/.test(pathname)) return json({ error: 'Agent 无权访问此接口' }, 403);
+    if (isAgent && !/^\/api\/(items(?:\/[a-f0-9]{32}(?:\/(?:renew|cancel|reactivate|renewals|balance-entries|topup|reconcile|bill)(?:\/[a-f0-9]{32}\/undo)?)?)?|summary|reminders|openapi\.json)$/.test(pathname)) return json({ error: 'Agent 无权访问此接口' }, 403);
     const needsBody = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
     if (isAgent && needsBody && agent?.scope !== 'write') return json({ error: '此令牌仅允许读取' }, 403);
     if (isAgent && needsBody && !req.headers.get('Idempotency-Key')) return json({ error: '写操作需要 Idempotency-Key 请求标识' }, 400);

@@ -186,3 +186,43 @@ test('独立 Bot 私聊发现不消费更新、不回传 Token，排除群组', 
   expect(JSON.parse(init.body as string)).not.toHaveProperty('offset');
   await expect(telegramChats(bot.token, async () => { throw new Error(bot.token); })).rejects.toThrow('读取 Telegram 私聊失败');
 });
+
+test('准备取消的订阅生成取消提醒；取消后不再提醒并作废排队中的旧提醒', async () => {
+  const r = command('create', '', { name: '订阅', amount: '20', cycle: 'monthly', next_date: '2026-02-03', status: 'cancelling', auto_renew: false }, opts).data as Item;
+  expect(reminders()).toEqual([expect.objectContaining({
+    key: `cancel:${r.id}:2026-02-03:before`, kind: 'cancel', title: '订阅：3 天后续费，记得在此前取消',
+    text: expect.stringContaining('计划日期 2026-02-03 · 每期 ¥20.00\n已标记准备取消：请到服务方取消，完成后在账本记录取消。'),
+  })]);
+  at('2026-02-03'); expect(reminders()[0]).toMatchObject({ key: `cancel:${r.id}:2026-02-03:due`, kind: 'cancel', title: '订阅：今天续费，如需取消请尽快' });
+  at('2026-02-05'); expect(reminders()[0]).toMatchObject({ key: `cancel:${r.id}:2026-02-03:due`, title: '订阅：续费日已过，请确认是否已取消' });
+  command('edit', r.id, { ...getRow(r.id), status: 'active' }, opts);
+  expect(reminders()[0]).toMatchObject({ kind: 'renewal', key: `renewal:${r.id}:2026-02-03:due` });
+  command('edit', r.id, { ...getRow(r.id), status: 'cancelling' }, opts);
+  saveSettings(bot); const fail = vi.fn(async () => { throw new Error('offline'); });
+  expect(await tick(fail)).toMatchObject({ sent: 0, errors: 1 });
+  command('cancel', r.id, { confirm: true, end_date: '2026-02-03' }, opts);
+  expect(reminders()).toEqual([]);
+  vi.setSystemTime(Date.now() + 61000);
+  const fetcher = vi.fn(delivered); await tick(fetcher); expect(fetcher).not.toHaveBeenCalled();
+  expect(notificationStatus().recent).toEqual([expect.objectContaining({ notification_key: `cancel:${r.id}:2026-02-03:due`, status: 'cancelled' })]);
+});
+
+test('Agent 取消与恢复经 Idempotency-Key 去重，路径白名单放行', async () => {
+  const r = command('create', '', { name: '订阅', amount: '20', cycle: 'monthly', next_date: '2026-02-03', status: 'active', auto_renew: true }, opts).data as Item;
+  const write = createToken({ name: 'write', scope: 'write' }); const read = createToken({ name: 'read', scope: 'read' });
+  const body = { confirm: true, cancelled_at: '2026-01-31', end_date: '2026-02-03', reason: '不再使用' };
+  const first = await call(write.token, 'POST', `/items/${r.id}/cancel`, body, 'cancel-key-0001');
+  expect(first.status).toBe(200);
+  const result = await first.json() as { item: { status: string } };
+  expect(result.item.status).toBe('cancelled');
+  const replay = await call(write.token, 'POST', `/items/${r.id}/cancel`, body, 'cancel-key-0001');
+  expect(replay.status).toBe(200); expect(await replay.json()).toEqual(result);
+  expect((await call(write.token, 'POST', `/items/${r.id}/cancel`, { ...body, reason: '换一个' }, 'cancel-key-0001')).status).toBe(409);
+  expect((await call(write.token, 'POST', `/items/${r.id}/cancel`, body, 'cancel-key-0002')).status).toBe(400);
+  expect((await call(read.token, 'POST', `/items/${r.id}/reactivate`, { confirm: true, next_date: '2026-03-03' }, 'reactivate-0001')).status).toBe(403);
+  const back = await call(write.token, 'POST', `/items/${r.id}/reactivate`, { confirm: true, next_date: '2026-03-03' }, 'reactivate-0001');
+  expect(back.status).toBe(200);
+  expect(getRow(r.id)).toMatchObject({ status: 'active', end_date: null, next_date: '2026-03-03', auto_renew: false });
+  expect(getRow(r.id)).not.toHaveProperty('cancelled_at');
+  expect(((await (await call(write.token, 'GET', `/items/${r.id}`)).json()) as { effective_status: string }).effective_status).toBe('active');
+});

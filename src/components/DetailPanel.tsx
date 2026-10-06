@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Check, Pencil, Trash2, Undo2, X, ExternalLink } from 'lucide-react';
+import { Ban, Check, Pencil, RotateCcw, Trash2, Undo2, X, ExternalLink } from 'lucide-react';
 import { useLedger } from './ledger-context';
 import { DateText, MoneyText } from './bits';
 import { cycleLabel, friendlyDate, historySummary, money, recordedAt, relativeDay } from '@/lib/format';
 import { isActive, labels } from '@/lib/grouping';
+import { effectiveStatus } from '@/lib/status';
 import type { Renewal, Subscription } from '@/lib/types';
 import { BalanceHistory, cents } from './BalancePanel';
 import { api } from '@/lib/api';
@@ -108,7 +109,7 @@ function RenewalHistory({ r }: { r: Subscription }) {
 }
 
 export default function DetailPanel({ selected }: { selected: Subscription | null }) {
-  const { today, closeDetail, openEditor, openRenew, openBalance, confirm, load, reportOk, reportError, setFocusKey, detailError, detailRef } = useLedger();
+  const { today, closeDetail, openEditor, openRenew, openCancel, openReactivate, openBalance, confirm, load, reportOk, reportError, setFocusKey, detailError, detailRef } = useLedger();
   const bodyRef = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef('');
 
@@ -124,7 +125,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
     const ok = await confirm({
       title: `删除「${r.name}」？`,
       body: '这条记录及其全部续费历史、余额流水将被删除，无法撤销。',
-      note: '如果只是停用，可改为「已取消续费」或「已结束」保留记录。',
+      note: r.kind === 'prepaid' ? '如果只是停用，可改为「已取消续费」或「已结束」保留记录。' : '如果只是不再续费，可使用「取消订阅」保留记录。',
       accept: '删除订阅',
     });
     if (!ok) return;
@@ -133,6 +134,8 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
     await load();
     reportOk(`已删除「${r.name}」`);
   };
+
+  const cancelled = selected !== null && selected.kind !== 'prepaid' && selected.status === 'cancelled';
 
   return (
     <dialog
@@ -166,7 +169,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                   {detailError}
                 </p>
               )}
-              <span className={`chip chip--${selected.status}`}>{labels[selected.status]}</span>
+              <span className={`chip chip--${effectiveStatus(selected, today)}`}>{labels[effectiveStatus(selected, today)]}</span>
               <p className="detail-amount">
                 <MoneyText value={selected.amount} />
               </p>
@@ -181,7 +184,7 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                   const rel = relativeDay(selected.next_date, today);
                   return (
                     <div className={`detail-plan${rel.cls ? ` ${rel.cls}` : ''}`}>
-                      <span>{selected.kind === 'prepaid' ? '下次自动记账' : '当前待确认计划'}</span>
+                      <span>{selected.kind === 'prepaid' ? '下次自动记账' : selected.status === 'cancelling' ? '需在此日期前取消' : '当前待确认计划'}</span>
                       <strong>{rel.text}</strong>
                       <span className="detail-plan-date">
                         {selected.next_date} · {friendlyDate(selected.next_date, today)}
@@ -201,9 +204,27 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                 <dd>{selected.kind === 'prepaid' ? (selected.cost_type === 'estimated' ? '按估算自动扣减账面余额' : '按固定金额自动扣减账面余额') : selected.auto_renew ? '自动续费已开' : '手动续费'}</dd>
                 <dt>计入预算</dt>
                 <dd>{isActive(selected) ? '是' : '否'}</dd>
-                <dt>服务可用截止日</dt>
-                <dd>{selected.end_date ? `${selected.end_date} · ${friendlyDate(selected.end_date, today)}` : '未填写'}</dd>
+                {!cancelled && (
+                  <>
+                    <dt>服务可用截止日</dt>
+                    <dd>{selected.end_date ? `${selected.end_date} · ${friendlyDate(selected.end_date, today)}` : '未填写'}</dd>
+                  </>
+                )}
               </dl>
+              {cancelled && (
+                <dl className="detail-facts" aria-label="取消信息">
+                  <dt>取消于</dt>
+                  <dd>{selected.cancelled_at ?? '未记录'}</dd>
+                  <dt>服务可用至</dt>
+                  <dd>{selected.end_date ? `${selected.end_date} · ${friendlyDate(selected.end_date, today)}` : '未填写'}</dd>
+                  {selected.cancel_reason && (
+                    <>
+                      <dt>取消原因</dt>
+                      <dd>{selected.cancel_reason}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
               {selected.url && (
                 <a className="detail-link" href={selected.url} target="_blank" rel="noopener noreferrer">
                   前往管理订阅
@@ -213,6 +234,12 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
               <h3>备注</h3>
               <p className="detail-notes">{selected.notes || '暂无备注'}</p>
               {selected.kind === 'prepaid' ? <BalanceHistory item={selected} /> : <RenewalHistory r={selected} />}
+              {selected.kind !== 'prepaid' && isActive(selected) && (
+                <button type="button" className="quiet" onClick={() => openCancel(selected)}>
+                  <Ban aria-hidden="true" />
+                  取消订阅
+                </button>
+              )}
               <button type="button" className="quiet danger-text" onClick={() => void remove(selected).catch(reportError)}>
                 <Trash2 aria-hidden="true" />
                 删除订阅
@@ -227,10 +254,15 @@ export default function DetailPanel({ selected }: { selected: Subscription | nul
                 <Pencil aria-hidden="true" />
                 编辑订阅
               </button>
-              {selected.kind === 'prepaid' ? <button type="button" onClick={() => openBalance({ item: selected, action: 'topup' })}>记录充值</button> : isActive(selected) && (
+              {selected.kind === 'prepaid' ? <button type="button" onClick={() => openBalance({ item: selected, action: 'topup' })}>记录充值</button> : isActive(selected) ? (
                 <button type="button" onClick={() => openRenew(selected)}>
                   <Check aria-hidden="true" />
                   记录续费
+                </button>
+              ) : (selected.status === 'cancelled' || selected.status === 'ended') && (
+                <button type="button" onClick={() => openReactivate(selected)}>
+                  <RotateCcw aria-hidden="true" />
+                  恢复订阅
                 </button>
               )}
             </>

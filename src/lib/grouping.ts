@@ -1,6 +1,7 @@
 /** 列表分组/筛选/排序与 hash 路由解析。移植自原 app.js。 */
 import type { StatusKey, Subscription, ViewKey } from './types';
 import { daysUntil } from './format';
+import { effectiveStatus } from './status';
 
 export const labels: Record<StatusKey, string> = {
   active: '使用中',
@@ -45,7 +46,7 @@ export function selectGroups(items: Subscription[], sel: Selection): Group[] {
   const selected = items.filter(
     (r) =>
       (sel.view !== 'recent' || recentGroup(r, sel.today) !== null) &&
-      (sel.filter === 'all' || r.status === sel.filter) &&
+      (sel.filter === 'all' || effectiveStatus(r, sel.today) === sel.filter) &&
       (!query || (r.name + ' ' + r.notes).toLocaleLowerCase().includes(query)),
   );
   selected.sort((a, b) => {
@@ -69,7 +70,7 @@ export function selectGroups(items: Subscription[], sel: Selection): Group[] {
     .map(([key, title]) => ({
       key: `${sel.view}:${key}`,
       title,
-      rows: selected.filter((r) => (sel.view === 'recent' ? recentGroup(r, sel.today) : r.status) === key),
+      rows: selected.filter((r) => (sel.view === 'recent' ? recentGroup(r, sel.today) : effectiveStatus(r, sel.today)) === key),
     }))
     .filter((g) => g.rows.length > 0);
 }

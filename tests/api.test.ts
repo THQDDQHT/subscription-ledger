@@ -6,6 +6,7 @@ import path from 'node:path';
 import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import { hashPassword, readSessionFrom, sessionSecret } from '@/server/auth';
 import { handleApi } from '@/server/api';
+import { todayInShanghai } from '@/server/domain';
 import { TestClient, post } from './helpers';
 import { item } from './domain.test';
 
@@ -106,7 +107,7 @@ describe('CRUD、续费与持久化', () => {
     const items = (await client.json('/api/items')) as Array<{ next_date: string; suggested_next: string }>;
     expect(items[0].next_date).toBe('2024-02-29');
     expect(items[0].suggested_next).toBe('2024-03-31');
-    expect((await post(client, `/api/items/${ident}`, item({ next_date: '2024-02-29', status: 'cancelled', end_date: '2024-03-01' }), 'put')).status).toBe(200);
+    expect((await post(client, `/api/items/${ident}/cancel`, { confirm: true, end_date: '2024-03-01' })).status).toBe(200);
     // 已取消状态不能确认续费
     expect((await post(client, `/api/items/${ident}/renew`, { actual_date: '2024-02-29', next_date: '2024-03-31', confirm: true })).status).toBe(400);
     // 模拟重启：新客户端读同一数据目录，记录仍在
@@ -117,6 +118,114 @@ describe('CRUD、续费与持久化', () => {
     expect((await post(client, `/api/items/${ident}`, {}, 'delete')).status).toBe(400);
     expect((await post(client, `/api/items/${ident}`, { confirm: true }, 'delete')).status).toBe(200);
     expect(await client.json('/api/items')).toEqual([]);
+  });
+});
+
+describe('取消与恢复订阅', () => {
+  const create = async (patch: Record<string, unknown> = {}) => ((await (await post(client, '/api/items', item(patch))).json()) as { id: string }).id;
+  const row = async (ident: string) => (await client.json('/api/items') as Array<Record<string, unknown>>).find((r) => r.id === ident)!;
+  const CANCEL = { confirm: true, cancelled_at: '2024-02-01', end_date: '2024-02-29', reason: '  太贵了  ' };
+  const addDay = (iso: string, n: number) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+
+  test('取消记录日期与原因，关闭自动续费，不再计入预算与提醒，并按截止日推算为已结束', async () => {
+    const ident = await create();
+    expect((await client.json('/api/summary') as { monthly_budget: string }).monthly_budget).toBe('12.30');
+    expect((await client.json('/api/reminders') as unknown[]).length).toBe(1);
+    const before = await row(ident);
+    const res = await post(client, `/api/items/${ident}/cancel`, CANCEL);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; item: Record<string, unknown> };
+    expect(body.ok).toBe(true);
+    expect(body.item).toMatchObject({ status: 'cancelled', auto_renew: false, end_date: '2024-02-29', cancelled_at: '2024-02-01', cancel_reason: '太贵了' });
+    const after = await row(ident);
+    expect(after).toMatchObject({ status: 'cancelled', effective_status: 'ended', next_date: before.next_date, amount: before.amount, cycle: before.cycle, anchor_day: before.anchor_day, anchor_month: before.anchor_month });
+    expect(await client.json(`/api/items/${ident}`)).toMatchObject({ effective_status: 'ended', cancelled_at: '2024-02-01' });
+    expect((await client.json('/api/summary') as { monthly_budget: string }).monthly_budget).toBe('0.00');
+    expect(await client.json('/api/reminders')).toEqual([]);
+    // 截止日当天仍可用，不推算为已结束。
+    const open = await create();
+    await post(client, `/api/items/${open}/cancel`, { confirm: true, end_date: todayInShanghai() });
+    expect(await row(open)).toMatchObject({ status: 'cancelled', effective_status: 'cancelled', cancel_reason: '' });
+  });
+
+  test('取消默认今天为取消日期；未确认、未来日期、超长原因、缺截止日、余额账户与重复取消均拒绝', async () => {
+    const ident = await create();
+    const reject = async (data: Record<string, unknown>, text: string, target = ident) => {
+      const res = await post(client, `/api/items/${target}/cancel`, data);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toContain(text);
+    };
+    await reject({ ...CANCEL, confirm: false }, '明确确认');
+    await reject({ ...CANCEL, confirm: undefined }, '明确确认');
+    await reject({ ...CANCEL, cancelled_at: addDay(todayInShanghai(), 1) }, '不能在未来');
+    await reject({ ...CANCEL, reason: 'x'.repeat(501) }, '500');
+    await reject({ ...CANCEL, end_date: undefined }, '日期');
+    expect((await row(ident)).status).toBe('active');
+    const today = todayInShanghai();
+    const prepaid = await create({ kind: 'prepaid', cost_type: 'fixed', balance: '100', balance_as_of: today, next_date: addDay(today, 1), auto_renew: false });
+    await reject(CANCEL, '余额账户', prepaid);
+    expect((await post(client, `/api/items/${ident}/cancel`, { confirm: true, end_date: '2024-02-29', reason: 'x'.repeat(500) })).status).toBe(200);
+    expect((await row(ident)).cancelled_at).toBe(today);
+    await reject(CANCEL, '只有使用中或准备取消', ident);
+    expect((await client.json('/api/items') as Array<{ id: string }>).length).toBe(2);
+  });
+
+  test('准备取消的订阅可以取消；编辑已取消记录保留取消信息，离开已取消状态后丢弃', async () => {
+    const ident = await create({ status: 'cancelling' });
+    expect((await post(client, `/api/items/${ident}/cancel`, CANCEL)).status).toBe(200);
+    const saved = await row(ident);
+    expect((await post(client, `/api/items/${ident}`, { ...saved, notes: '改备注', end_date: '2024-03-15', cancelled_at: '1999-01-01', cancel_reason: '被忽略' }, 'put')).status).toBe(200);
+    expect(await row(ident)).toMatchObject({ notes: '改备注', end_date: '2024-03-15', status: 'cancelled', cancelled_at: '2024-02-01', cancel_reason: '太贵了' });
+    expect((await post(client, `/api/items/${ident}`, { ...saved, status: 'ended' }, 'put')).status).toBe(200);
+    const ended = await row(ident);
+    expect(ended.status).toBe('ended');
+    expect(ended).not.toHaveProperty('cancelled_at');
+    expect(ended).not.toHaveProperty('cancel_reason');
+  });
+
+  test('普通订阅不能经编辑改为已取消；余额账户暂停照旧可用', async () => {
+    const ident = await create();
+    const res = await post(client, `/api/items/${ident}`, item({ status: 'cancelled' }), 'put');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('取消订阅请使用取消操作，以记录取消日期与原因');
+    expect((await row(ident)).status).toBe('active');
+    const created = await post(client, '/api/items', item({ status: 'cancelled' }));
+    expect(created.status).toBe(400);
+    expect(((await created.json()) as { error: string }).error).toBe('取消订阅请使用取消操作，以记录取消日期与原因');
+    const today = todayInShanghai();
+    const prepaid = await create({ kind: 'prepaid', cost_type: 'fixed', balance: '100', balance_as_of: today, next_date: addDay(today, 1), auto_renew: false });
+    expect((await post(client, `/api/items/${prepaid}`, { ...await row(prepaid), status: 'cancelled' }, 'put')).status).toBe(200);
+    const paused = await row(prepaid);
+    expect(paused).toMatchObject({ status: 'cancelled', effective_status: 'cancelled' });
+    expect(paused).not.toHaveProperty('cancelled_at');
+  });
+
+  test('恢复清除取消信息；拒绝未确认、过去日期、非已取消记录与余额账户；改日期重置锚点', async () => {
+    const ident = await create({ next_date: '2100-01-31' });
+    await post(client, `/api/items/${ident}/renew`, { actual_date: todayInShanghai(), next_date: '2100-02-15', confirm: true });
+    expect((await row(ident)).anchor_day).toBe(31);
+    const reactivate = (data: Record<string, unknown>) => post(client, `/api/items/${ident}/reactivate`, data);
+    expect((await reactivate({ confirm: true, next_date: '2100-02-15' })).status).toBe(400); // 仍在使用中
+    await post(client, `/api/items/${ident}/cancel`, { confirm: true, end_date: '2100-02-15', reason: '试用结束' });
+    expect((await reactivate({ confirm: false, next_date: '2100-02-15' })).status).toBe(400);
+    expect((await reactivate({ confirm: true, next_date: addDay(todayInShanghai(), -1) })).status).toBe(400);
+    expect((await reactivate({ confirm: true, next_date: '2100-02-15', auto_renew: 'yes' })).status).toBe(400);
+    expect((await row(ident)).status).toBe('cancelled');
+    const same = await reactivate({ confirm: true, next_date: '2100-02-15' });
+    expect(same.status).toBe(200);
+    let restored = await row(ident);
+    expect(restored).toMatchObject({ status: 'active', end_date: null, auto_renew: false, next_date: '2100-02-15', anchor_day: 31, effective_status: 'active' });
+    expect(restored).not.toHaveProperty('cancelled_at');
+    expect(restored).not.toHaveProperty('cancel_reason');
+    // 已结束的存储状态同样可以恢复；日期改动后锚点跟随新日期。
+    await post(client, `/api/items/${ident}`, { ...restored, status: 'ended' }, 'put');
+    expect((await reactivate({ confirm: true, next_date: '2100-03-20', auto_renew: true })).status).toBe(200);
+    restored = await row(ident);
+    expect(restored).toMatchObject({ status: 'active', auto_renew: true, next_date: '2100-03-20', anchor_day: 20, anchor_month: 3 });
+    const today = todayInShanghai();
+    const prepaid = await create({ kind: 'prepaid', cost_type: 'fixed', balance: '100', balance_as_of: today, next_date: addDay(today, 1), auto_renew: false });
+    await post(client, `/api/items/${prepaid}`, { ...await row(prepaid), status: 'cancelled' }, 'put');
+    expect((await post(client, `/api/items/${prepaid}/reactivate`, { confirm: true, next_date: '2100-03-20' })).status).toBe(400);
   });
 });
 
@@ -173,6 +282,42 @@ describe('备份与恢复', () => {
     const backups = fs.readdirSync(path.join(dir, 'backups')).filter((f) => f.endsWith('.sqlite3'));
     expect(backups).toHaveLength(1);
     expect(await (await client.get('/api/export')).json()).toEqual(original);
+  });
+
+  test('取消信息随备份往返；旧备份无新字段可恢复；非已取消记录带这些字段时忽略', async () => {
+    const ident = ((await (await post(client, '/api/items', item())).json()) as { id: string }).id;
+    await post(client, `/api/items/${ident}/cancel`, { confirm: true, cancelled_at: '2024-02-01', end_date: '2024-02-29', reason: '太贵了' });
+    const original = (await (await client.get('/api/export')).json()) as { version: number; items: Array<Record<string, unknown>> };
+    expect(original.version).toBe(1);
+    expect(original.items[0]).toMatchObject({ cancelled_at: '2024-02-01', cancel_reason: '太贵了' });
+    expect(original.items[0]).not.toHaveProperty('effective_status');
+    expect((await post(client, '/api/restore', { confirm: true, backup: original })).status).toBe(200);
+    expect(await (await client.get('/api/export')).json()).toEqual(original);
+
+    const legacy = JSON.parse(JSON.stringify(original));
+    delete legacy.items[0].cancelled_at;
+    delete legacy.items[0].cancel_reason;
+    expect((await post(client, '/api/restore', { confirm: true, backup: legacy })).status).toBe(200);
+    expect(await (await client.get('/api/export')).json()).toEqual(legacy);
+    const unrecorded = JSON.parse(JSON.stringify(original));
+    unrecorded.items[0].cancelled_at = null;
+    delete unrecorded.items[0].cancel_reason;
+    expect((await post(client, '/api/restore', { confirm: true, backup: unrecorded })).status).toBe(200);
+    expect(await (await client.get('/api/export')).json()).toEqual(legacy);
+
+    const active = JSON.parse(JSON.stringify(original));
+    active.items[0].status = 'active';
+    expect((await post(client, '/api/restore', { confirm: true, backup: active })).status).toBe(200);
+    const stripped = (await (await client.get('/api/export')).json()) as typeof original;
+    expect(stripped.items[0].status).toBe('active');
+    expect(stripped.items[0]).not.toHaveProperty('cancelled_at');
+    expect(stripped.items[0]).not.toHaveProperty('cancel_reason');
+
+    for (const patch of [{ cancel_reason: 'x'.repeat(501) }, { cancel_reason: 5 }, { cancelled_at: '2024-02-30' }]) {
+      const bad = { ...original, items: [{ ...original.items[0], ...patch }] };
+      expect((await post(client, '/api/restore', { confirm: true, backup: bad })).status).toBe(400);
+      expect(await (await client.get('/api/export')).json()).toEqual(stripped);
+    }
   });
 
   test('季付自定义确认、导出恢复与非法周期拒绝', async () => {

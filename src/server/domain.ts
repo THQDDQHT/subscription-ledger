@@ -30,6 +30,19 @@ export interface SubscriptionRecord {
   anchor_month: number;
   id?: string;
   suggested_next?: string;
+  cancelled_at?: string;
+  cancel_reason?: string;
+  effective_status?: string;
+}
+
+const CANCEL_REASON_MAX = 500;
+
+/** 取消原因：去首尾空白，≤500 字，可为空串。 */
+export function parseCancelReason(value: unknown): string {
+  if (typeof value !== 'string') fail('取消原因须为文本');
+  const reason = value.trim();
+  if (reason.length > CANCEL_REASON_MAX) fail(`取消原因不能超过 ${CANCEL_REASON_MAX} 字`);
+  return reason;
 }
 
 /** 领域/入参校验错误：API 层映射为 400；其余异常一律 500。对应 Python 版的 ValueError。 */
@@ -171,6 +184,12 @@ export function validate(data: unknown, previous?: SubscriptionRecord, restoring
       ? (previous?.low_balance_cents ?? (restoring ? parseCents(input.low_balance_cents) : 0))
       : parseAmount(input.low_balance);
     if (previous && input.balance !== undefined && parseBalance(input.balance) !== previous.balance_cents) fail('请使用充值或校正操作修改余额');
+  }
+  // 取消信息只属于已取消续费的普通订阅；编辑沿用旧值，离开已取消状态即丢弃。
+  if (record.kind !== 'prepaid' && record.status === 'cancelled') {
+    const source = restoring ? input : previous?.status === 'cancelled' ? previous as unknown as Record<string, unknown> : {};
+    if (source.cancelled_at !== undefined && source.cancelled_at !== null) record.cancelled_at = parseDate(source.cancelled_at);
+    if (source.cancel_reason !== undefined) record.cancel_reason = parseCancelReason(source.cancel_reason);
   }
   if (restoring) {
     for (const [key, maximum] of [['anchor_day', 31], ['anchor_month', 12]] as const) {

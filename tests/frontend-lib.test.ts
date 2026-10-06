@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { selectGroups, parseRoute, routeURL } from '@/lib/grouping';
+import { effectiveStatus } from '@/lib/status';
 import { money, moneyCents, friendlyDate, relativeDay, historySummary, recordedAt, cycleLabel } from '@/lib/format';
 import type { Subscription } from '@/lib/types';
 
@@ -135,4 +136,35 @@ test('余额不足在远期也展示，待自动扣减与订阅逾期分组分�
   expect(ids(selectGroups(records, { view: 'recent', filter: 'all', keyword: '', sort: 'date', today: TODAY }))).toEqual([
     ['recent:low_balance', ['low']], ['recent:pending', ['pending']], ['recent:overdue', ['old']],
   ]);
+});
+
+describe('推算已结束状态', () => {
+  test('截止日当天仍是已取消，早于今天才是已结束；无截止日与其他状态不推算', () => {
+    expect(effectiveStatus({ status: 'cancelled', end_date: TODAY }, TODAY)).toBe('cancelled');
+    expect(effectiveStatus({ status: 'cancelled', end_date: '2026-09-11' }, TODAY)).toBe('ended');
+    expect(effectiveStatus({ status: 'cancelled', end_date: '2026-09-13' }, TODAY)).toBe('cancelled');
+    expect(effectiveStatus({ status: 'cancelled', end_date: null }, TODAY)).toBe('cancelled');
+    expect(effectiveStatus({ status: 'cancelled', end_date: '2026-09-11' }, '')).toBe('cancelled');
+    expect(effectiveStatus({ status: 'cancelling', end_date: '2026-09-11' }, TODAY)).toBe('cancelling');
+    expect(effectiveStatus({ status: 'active', end_date: '2026-09-11' }, TODAY)).toBe('active');
+    expect(effectiveStatus({ status: 'ended', end_date: null }, TODAY)).toBe('ended');
+    // 余额账户的已取消表示暂停自动扣减，不推算。
+    expect(effectiveStatus({ status: 'cancelled', end_date: '2026-09-11', kind: 'prepaid' }, TODAY)).toBe('cancelled');
+  });
+
+  test('全部视图的分组、状态筛选按推算状态', () => {
+    const records = [
+      row({ id: 'over', name: 'Over', status: 'cancelled', end_date: '2026-09-11' }),
+      row({ id: 'edge', name: 'Edge', status: 'cancelled', end_date: TODAY }),
+      row({ id: 'open', name: 'Open', status: 'cancelled', end_date: null }),
+      row({ id: 'stored', name: 'Stored', status: 'ended' }),
+    ];
+    const all = { view: 'all' as const, keyword: '', sort: 'name' as const, today: TODAY };
+    expect(ids(selectGroups(records, { ...all, filter: 'all' }))).toEqual([
+      ['all:cancelled', ['edge', 'open']],
+      ['all:ended', ['over', 'stored']],
+    ]);
+    expect(ids(selectGroups(records, { ...all, filter: 'ended' }))).toEqual([['all:ended', ['over', 'stored']]]);
+    expect(ids(selectGroups(records, { ...all, filter: 'cancelled' }))).toEqual([['all:cancelled', ['edge', 'open']]]);
+  });
 });

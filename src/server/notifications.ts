@@ -59,6 +59,11 @@ export function reminders(items = rows(), today = todayInShanghai(), config = se
       title = `${r.name}：${lowNow ? '余额不足，请充值' : '下次扣减后余额偏低'}`;
       const expected = lowNow ? balance : balance - r.amount_cents;
       text = `${title}\n账面余额 ¥${money(balance)} · ${cost}\n下次扣减 ${r.next_date}\n${lowNow ? '当前' : '扣减后预计'}距提醒标准还差 ¥${money(minimum - expected)}\n余额核对日期 ${r.balance_as_of}；以平台实际余额为准。`;
+    } else if (r.status === 'cancelling') {
+      if (days > config.lead_days) continue;
+      key = `cancel:${r.id}:${r.next_date}:${days > 0 ? 'before' : 'due'}`;
+      title = `${r.name}：${days > 0 ? `${days} 天后续费，记得在此前取消` : days === 0 ? '今天续费，如需取消请尽快' : '续费日已过，请确认是否已取消'}`;
+      text = `${title}\n计划日期 ${r.next_date} · 每期 ¥${money(r.amount_cents)}\n已标记准备取消：请到服务方取消，完成后在账本记录取消。`;
     } else {
       if (days > config.lead_days) continue;
       key = `renewal:${r.id}:${r.next_date}:${days > 0 ? 'before' : 'due'}`;
@@ -66,7 +71,7 @@ export function reminders(items = rows(), today = todayInShanghai(), config = se
       text = `${title}\n计划日期 ${r.next_date} · 每期 ¥${money(r.amount_cents)}\n请核对是否续费，已完成后在账本记录。`;
     }
     if (config.base_url) text += `\n${config.base_url}/#all?item=${r.id}`;
-    result.push({ key, subscription_id: r.id, kind: r.kind === 'prepaid' ? 'low_balance' : 'renewal', title, text, date: r.next_date });
+    result.push({ key, subscription_id: r.id, kind: r.kind === 'prepaid' ? 'low_balance' : r.status === 'cancelling' ? 'cancel' : 'renewal', title, text, date: r.next_date });
   }
   return result;
 }

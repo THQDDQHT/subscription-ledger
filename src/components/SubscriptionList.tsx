@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronRight, Contrast, ListFilter, Plus, Search, X, Inbox, CircleAlert } from 'lucide-react';
+import { Ban, Check, ChevronRight, Contrast, ListFilter, Plus, Search, X, Inbox, CircleAlert } from 'lucide-react';
 import { useLedger } from './ledger-context';
 import { DateText, MoneyText } from './bits';
 import { cents } from './BalancePanel';
 import { cycleLabel, relativeDay, money } from '@/lib/format';
 import { isActive, labels, recentGroup, selectGroups } from '@/lib/grouping';
+import { effectiveStatus } from '@/lib/status';
 import type { Subscription } from '@/lib/types';
 import { SelectField } from './SelectField';
 
@@ -40,10 +41,11 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
 }
 
 function Row({ r }: { r: Subscription }) {
-  const { selectedId, view, today, showDetail, openRenew, openBalance } = useLedger();
+  const { selectedId, view, today, showDetail, openRenew, openCancel, openBalance } = useLedger();
   const active = isActive(r);
   const rel = relativeDay(r.next_date, today);
   const group = recentGroup(r, today);
+  const status = effectiveStatus(r, today);
   return (
     <article
       className={`subscription${r.id === selectedId ? ' selected' : ''}`}
@@ -60,7 +62,7 @@ function Row({ r }: { r: Subscription }) {
         aria-label={`查看 ${r.name} 的详情`}
         onClick={() => showDetail(r)}
       >
-        <span className={`avatar avatar--${r.status}`} aria-hidden="true">
+        <span className={`avatar avatar--${status}`} aria-hidden="true">
           {Array.from(r.name)[0] || '订'}
         </span>
         <span className="row-name">
@@ -90,9 +92,20 @@ function Row({ r }: { r: Subscription }) {
         </div>
       )}
       <div className="row-status">
-        <span className={`chip chip--${r.status}`}>{labels[r.status]}</span>
+        <span className={`chip chip--${status}`}>{labels[status]}</span>
         <div className="row-actions">
-          {r.kind === 'prepaid' && active ? <button className="ghost compact" onClick={() => openBalance({ item: r, action: 'topup' })}>充值</button> : view === 'recent' && (group === 'overdue' || group === 'week') ? (
+          {r.kind === 'prepaid' && active ? <button className="ghost compact" onClick={() => openBalance({ item: r, action: 'topup' })}>充值</button> : view === 'recent' && (group === 'overdue' || group === 'week') && r.status === 'cancelling' ? (
+            <button
+              type="button"
+              className="ghost compact"
+              data-key={`${r.id}:cancel`}
+              aria-label={`记录 ${r.name} 的取消`}
+              onClick={() => openCancel(r)}
+            >
+              <Ban aria-hidden="true" />
+              记录取消
+            </button>
+          ) : view === 'recent' && (group === 'overdue' || group === 'week') ? (
             <button
               type="button"
               className="ghost compact"

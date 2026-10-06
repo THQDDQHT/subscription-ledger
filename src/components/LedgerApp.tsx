@@ -10,7 +10,7 @@ import { Sidebar, Topbar, MobileNav } from './shell';
 import Overview from './Overview';
 import SubscriptionList from './SubscriptionList';
 import DetailPanel from './DetailPanel';
-import { ConfirmDialog, EditorDialog, RenewDialog } from './dialogs';
+import { CancelDialog, ConfirmDialog, EditorDialog, ReactivateDialog, RenewDialog } from './dialogs';
 import { BalanceDialog, type BalanceAction } from './BalancePanel';
 import BackupView from './BackupView';
 
@@ -45,6 +45,8 @@ export default function LedgerApp() {
   const [wide, setWide] = useState(true);
   const [editing, setEditing] = useState<Subscription | null | undefined>(undefined);
   const [renewing, setRenewing] = useState<Subscription | null>(null);
+  const [cancelling, setCancelling] = useState<Subscription | null>(null);
+  const [reactivating, setReactivating] = useState<Subscription | null>(null);
   const [balanceAction, setBalanceAction] = useState<BalanceAction | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
@@ -95,6 +97,8 @@ export default function LedgerApp() {
     setMessage(null);
     setEditing(undefined);
     setRenewing(null);
+    setCancelling(null);
+    setReactivating(null);
     setBalanceAction(null);
     setConfirmState((current) => {
       current?.resolve(false);
@@ -194,7 +198,7 @@ export default function LedgerApp() {
   // ---------- 详情弹窗形态：宽屏并排（非模态），窄屏模态 ----------
 
   const editorOpen = editing !== undefined;
-  const renewOpen = renewing !== null || balanceAction !== null;
+  const renewOpen = renewing !== null || cancelling !== null || reactivating !== null || balanceAction !== null;
   const confirmOpen = confirmState !== null;
 
   useEffect(() => {
@@ -256,6 +260,8 @@ export default function LedgerApp() {
   const openEditor = useCallback((r: Subscription | null) => setEditing(r), []);
   const openBalance = useCallback((state: BalanceAction) => setBalanceAction(state), []);
   const openRenew = useCallback((r: Subscription) => setRenewing(r), []);
+  const openCancel = useCallback((r: Subscription) => setCancelling(r), []);
+  const openReactivate = useCallback((r: Subscription) => setReactivating(r), []);
 
   const confirm = useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
@@ -384,6 +390,8 @@ export default function LedgerApp() {
       closeDetail,
       openEditor,
       openRenew,
+      openCancel,
+      openReactivate,
       openBalance,
       confirm,
       setFilter,
@@ -399,7 +407,7 @@ export default function LedgerApp() {
     [
       booted, authed, configured, items, stats, today, view, selectedId, filter, sort, keyword,
       collapsed, searching, loading, loadError, message, detailError, wide,
-      login, logout, load, navigate, showDetail, closeDetail, openEditor, openRenew, openBalance, confirm,
+      login, logout, load, navigate, showDetail, closeDetail, openEditor, openRenew, openCancel, openReactivate, openBalance, confirm,
       setFilter, setSort, setKeyword, setGroupCollapsed, reportOk, reportError, clearReport, fetchHistory, setFocusKey,
     ],
   );
@@ -444,6 +452,8 @@ export default function LedgerApp() {
           <EditorDialog editing={editing} onClose={() => setEditing(undefined)} />
           <BalanceDialog state={balanceAction} onClose={() => setBalanceAction(null)} />
           <RenewDialog renewing={renewing} onClose={() => setRenewing(null)} />
+          <CancelDialog cancelling={cancelling} onClose={() => setCancelling(null)} />
+          <ReactivateDialog reactivating={reactivating} onClose={() => setReactivating(null)} />
           <ConfirmDialog state={confirmState} onDone={(v) => { confirmState?.resolve(v); setConfirmState(null); }} />
         </>
       )}

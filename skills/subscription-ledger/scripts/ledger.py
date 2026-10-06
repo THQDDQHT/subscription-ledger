@@ -29,7 +29,7 @@ def main():
         parser.error('Use HTTPS, or loopback HTTP on the ledger host')
     if not re.fullmatch(r'ledger_[A-Za-z0-9_-]{43}', token):
         parser.error('Set a valid LEDGER_API_TOKEN in the agent environment')
-    if not re.fullmatch(r'/(?:items(?:/[a-f0-9]{32}(?:/(?:topup|reconcile|bill|renew|balance-entries|renewals)(?:/[a-f0-9]{32}/undo)?)?)?|summary|reminders|openapi\.json)', args.path):
+    if not re.fullmatch(r'/(?:items(?:/[a-f0-9]{32}(?:/(?:topup|reconcile|bill|renew|cancel|reactivate|balance-entries|renewals)(?:/[a-f0-9]{32}/undo)?)?)?|summary|reminders|openapi\.json)', args.path):
         parser.error('Unsupported API path')
     headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
     data = None

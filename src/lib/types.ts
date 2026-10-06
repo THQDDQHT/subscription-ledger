@@ -22,6 +22,9 @@ export interface Subscription {
   anchor_day: number;
   anchor_month: number;
   suggested_next?: string;
+  cancelled_at?: string;
+  cancel_reason?: string;
+  effective_status?: StatusKey;
 }
 
 export interface Renewal {
@@ -79,7 +82,7 @@ export interface BalanceEntry {
 export interface Reminder {
   key: string;
   subscription_id: string;
-  kind: 'renewal' | 'low_balance';
+  kind: 'renewal' | 'low_balance' | 'cancel';
   title: string;
   text: string;
   date: string;

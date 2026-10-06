@@ -72,7 +72,11 @@ test('续费确认：未确认/未来实际日期/倒退日期均拒绝；状态
     expect((await post(client, `/api/items/${ident}/renew`, data)).status).toBe(400);
   }
   for (const status of ['cancelling', 'cancelled', 'ended', 'active']) {
-    expect((await post(client, `/api/items/${ident}`, item({ status }), 'put')).status).toBe(200);
+    // 普通订阅改为已取消须走取消操作；其余状态仍可经编辑切换。
+    const res = status === 'cancelled'
+      ? await post(client, `/api/items/${ident}/cancel`, { confirm: true, end_date: '2024-03-01' })
+      : await post(client, `/api/items/${ident}`, item({ status }), 'put');
+    expect(res.status).toBe(200);
     expect((await client.json('/api/items') as Array<{ status: string }>)[0].status).toBe(status);
   }
 });
